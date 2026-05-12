@@ -3,7 +3,7 @@
 # =====================================================================
 #  Build stage — .NET SDK 9 + Node 22 (necessário para o SPA build)
 # =====================================================================
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:9.0-noble AS build
 WORKDIR /src
 
 # Node 22 (para o target PublishRunWebpack do PcaImporter.Api.csproj
@@ -35,7 +35,7 @@ RUN dotnet publish src/PcaImporter.Api/PcaImporter.Api.csproj \
 # =====================================================================
 #  Runtime stage — só o ASP.NET runtime, imagem pequena.
 # =====================================================================
-FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-noble AS runtime
 WORKDIR /app
 
 # Diretório persistente para o SQLite (mapeado por volume).
