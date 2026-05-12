@@ -8,7 +8,7 @@ on:
 
 env:
   # Repo do Docker Hub = <usuario>/<nome-do-repo-no-github>
-  IMAGE_NAME: ${{ vars.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}
+  IMAGE_NAME: ${{ (vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME) }}/${{ github.event.repository.name }}
 
 jobs:
   build-push:
@@ -26,7 +26,7 @@ jobs:
       - name: Login no Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
+          username: ${{ (vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME) }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Gerar tags e labels
