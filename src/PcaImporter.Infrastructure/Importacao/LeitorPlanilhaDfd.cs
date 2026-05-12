@@ -203,10 +203,51 @@ public static class LeitorPlanilhaDfd
         if (!mapa.TryGetValue(col, out var idx)) return null;
         var cell = row.Cell(idx);
         if (cell.IsEmpty()) return null;
-        if (cell.TryGetValue<DateTime>(out var dt)) return DateOnly.FromDateTime(dt);
-        var s = cell.GetString().Trim();
-        if (DateOnly.TryParse(s, out var d)) return d;
-        if (DateTime.TryParse(s, out var dt2)) return DateOnly.FromDateTime(dt2);
+        // Célula realmente de data → ClosedXML resolve direto.
+        if (cell.DataType == ClosedXML.Excel.XLDataType.DateTime && cell.TryGetValue<DateTime>(out var dt))
+        {
+            return DateOnly.FromDateTime(dt);
+        }
+        // Demais casos (texto): nosso parser robusto.
+        return ParsearDataLivre(cell.GetString());
+    }
+
+    /// <summary>
+    /// Aceita datas em formato ISO (yyyy-MM-dd) e brasileiro (dd/MM/yyyy, dd/MM/yy),
+    /// com separadores ".", "-" ou "/". Também aceita timestamps ("2027-05-15 00:00:00").
+    /// Independente da cultura do SO/container — formatos são explícitos.
+    /// </summary>
+    internal static DateOnly? ParsearDataLivre(string? entrada)
+    {
+        if (string.IsNullOrWhiteSpace(entrada)) return null;
+        var s = entrada.Trim();
+
+        string[] formatos =
+        [
+            "yyyy-MM-dd", "yyyy/MM/dd", "yyyy.MM.dd",
+            "dd/MM/yyyy", "dd-MM-yyyy", "dd.MM.yyyy",
+            "d/M/yyyy",  "d-M-yyyy",   "d.M.yyyy",
+            "dd/MM/yy",  "dd-MM-yy",   "dd.MM.yy",
+            "yyyy-MM-ddTHH:mm:ss", "yyyy-MM-dd HH:mm:ss",
+            "dd/MM/yyyy HH:mm:ss",
+        ];
+
+        if (DateOnly.TryParseExact(s, formatos,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AllowWhiteSpaces, out var d))
+        {
+            return d;
+        }
+        if (DateTime.TryParseExact(s, formatos,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AllowWhiteSpaces, out var dt))
+        {
+            return DateOnly.FromDateTime(dt);
+        }
+        // Última tentativa, cultura pt-BR (cobre variações com / e -)
+        var ptBr = System.Globalization.CultureInfo.GetCultureInfo("pt-BR");
+        if (DateOnly.TryParse(s, ptBr, System.Globalization.DateTimeStyles.AllowWhiteSpaces, out var d2)) return d2;
+        if (DateTime.TryParse(s, ptBr, System.Globalization.DateTimeStyles.AllowWhiteSpaces, out var dt2)) return DateOnly.FromDateTime(dt2);
         return null;
     }
 

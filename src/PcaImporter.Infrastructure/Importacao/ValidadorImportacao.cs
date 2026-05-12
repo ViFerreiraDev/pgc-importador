@@ -19,7 +19,7 @@ public static class ValidadorImportacao
         else if (entrada.DataConclusaoContratacao is null)
         {
             erros.Add(new ErroValidacao("DFD", "dataConclusaoContratacao",
-                $"Data inválida '{entrada.DataConclusaoContratacaoTexto}'. Use o formato AAAA-MM-DD."));
+                $"Data inválida '{entrada.DataConclusaoContratacaoTexto}'. Aceitos: AAAA-MM-DD (ex.: 2027-05-15) ou DD/MM/AAAA (ex.: 15/05/2027)."));
         }
         else if (entrada.DataConclusaoContratacao.Value < DateOnly.FromDateTime(DateTime.Today))
         {

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import {
-  AlertTriangle, CheckCircle2, Eraser, ExternalLink, Loader2, ListChecks, Search, XCircle,
+  AlertTriangle, CheckCircle2, Eraser, ExternalLink, Loader2, ListChecks, RotateCw, Search, XCircle,
 } from 'lucide-react'
 import { PageHeader } from '@/components/comum/PageHeader'
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -55,10 +55,17 @@ export function ValidarLote() {
     setProgresso({ feitos: 0, total: 0 })
   }
 
-  async function validarTodos() {
-    if (links.length === 0) return
+  async function rodarValidacao(alvos: LinkExtraido[]) {
+    if (alvos.length === 0) return
     setExecutando(true)
-    setProgresso({ feitos: 0, total: links.length })
+    setProgresso({ feitos: 0, total: alvos.length })
+
+    // Reseta apenas os escolhidos para 'pendente' antes de rodar.
+    setResultados((prev) => {
+      const novo = new Map(prev)
+      for (const link of alvos) novo.set(link.idPlanilha, { estado: 'pendente' })
+      return novo
+    })
 
     let feitos = 0
     let i = 0
@@ -72,9 +79,9 @@ export function ValidarLote() {
     }
 
     async function worker() {
-      while (i < links.length) {
+      while (i < alvos.length) {
         const idx = i++
-        const link = links[idx]
+        const link = alvos[idx]
         atualizar(link.idPlanilha, { estado: 'validando' })
         try {
           const r = await importacaoApi.validarLink(link.url)
@@ -89,7 +96,7 @@ export function ValidarLote() {
           })
         } finally {
           feitos++
-          setProgresso({ feitos, total: links.length })
+          setProgresso({ feitos, total: alvos.length })
         }
       }
     }
@@ -97,6 +104,22 @@ export function ValidarLote() {
     // Concorrência limitada — 3 em paralelo (evita estressar o Sheets/API)
     await Promise.all([worker(), worker(), worker()])
     setExecutando(false)
+  }
+
+  function validarTodos() {
+    void rodarValidacao(links)
+  }
+
+  function retentarFalhas() {
+    const falhas = links.filter((l) => {
+      const r = resultados.get(l.idPlanilha)
+      return r?.estado === 'invalido' || r?.estado === 'erro'
+    })
+    void rodarValidacao(falhas)
+  }
+
+  function retentarUm(link: LinkExtraido) {
+    void rodarValidacao([link])
   }
 
   const stats = useMemo(() => {
@@ -159,10 +182,17 @@ export function ValidarLote() {
                 {stats.totalMateriais > 0 && <> · {stats.totalMateriais.toLocaleString('pt-BR')} materiais somados</>}
               </CardDescription>
             </div>
-            <Button onClick={() => void validarTodos()} disabled={executando}>
-              {executando ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
-              {executando ? `Validando ${progresso.feitos}/${progresso.total}…` : 'Validar todos'}
-            </Button>
+            <div className="flex gap-2">
+              {(stats.invalidos > 0 || stats.erros > 0) && !executando && (
+                <Button variant="secondary" onClick={retentarFalhas}>
+                  <RotateCw /> Tentar de novo {stats.invalidos + stats.erros}
+                </Button>
+              )}
+              <Button onClick={validarTodos} disabled={executando}>
+                {executando ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
+                {executando ? `Validando ${progresso.feitos}/${progresso.total}…` : 'Validar todos'}
+              </Button>
+            </div>
           </CardHeader>
 
           {executando && (
@@ -214,11 +244,18 @@ export function ValidarLote() {
                         {r.resultado ? r.resultado.avisos.length : '—'}
                       </Td>
                       <Td className="text-right">
-                        {(r.estado === 'invalido' || r.estado === 'erro' || (r.estado === 'valido' && (r.resultado?.avisos.length ?? 0) > 0)) && (
-                          <Button variant="ghost" size="xs" onClick={() => setDetalhes({ link: l, r })}>
-                            Detalhes
-                          </Button>
-                        )}
+                        <div className="inline-flex items-center gap-1 justify-end">
+                          {(r.estado === 'invalido' || r.estado === 'erro') && !executando && (
+                            <Button variant="ghost" size="xs" onClick={() => retentarUm(l)} title="Tentar de novo">
+                              <RotateCw />
+                            </Button>
+                          )}
+                          {(r.estado === 'invalido' || r.estado === 'erro' || (r.estado === 'valido' && (r.resultado?.avisos.length ?? 0) > 0)) && (
+                            <Button variant="ghost" size="xs" onClick={() => setDetalhes({ link: l, r })}>
+                              Detalhes
+                            </Button>
+                          )}
+                        </div>
                       </Td>
                     </tr>
                   )
