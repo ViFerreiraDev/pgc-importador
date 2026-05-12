@@ -30,8 +30,8 @@ dist-ssr/
 .vite/
 *.local
 
-# Logs
-logs/
+# Logs (somente runtime — não confundir com pastas de código "Logs/")
+/logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
