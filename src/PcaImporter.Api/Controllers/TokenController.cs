@@ -5,7 +5,7 @@ namespace PcaImporter.Api.Controllers;
 
 [ApiController]
 [Route("api/token")]
-[Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+[Microsoft.AspNetCore.Authorization.Authorize]
 public sealed class TokenController : ControllerBase
 {
     private readonly IGerenciadorTokenSessao _gerenciador;
@@ -24,6 +24,7 @@ public sealed class TokenController : ControllerBase
     }
 
     [HttpPost]
+    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
     public async Task<ActionResult<StatusTokenDto>> Definir([FromBody] DefinirTokenInput input, CancellationToken ct)
     {
         if (input is null || string.IsNullOrWhiteSpace(input.RefreshToken))
@@ -49,6 +50,7 @@ public sealed class TokenController : ControllerBase
     }
 
     [HttpPost("refresh")]
+    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
     public async Task<ActionResult<StatusTokenDto>> ForcarRefresh(CancellationToken ct)
     {
         var status = await _gerenciador.ForcarRefreshAsync(ct);
@@ -56,6 +58,7 @@ public sealed class TokenController : ControllerBase
     }
 
     [HttpDelete]
+    [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
     public ActionResult<StatusTokenDto> Limpar()
     {
         _gerenciador.Limpar();

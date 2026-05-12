@@ -44,9 +44,11 @@ const APARENCIA: Record<EstadoToken, { chip: string; ponto: string; rotulo: stri
 
 interface Props {
   onSubstituir: () => void
+  /** Quando true, mostra só o chip — sem dropdown de ações admin. */
+  apenasLeitura?: boolean
 }
 
-export function StatusToken({ onSubstituir }: Props) {
+export function StatusToken({ onSubstituir, apenasLeitura = false }: Props) {
   const { status, refresh, limpar } = useToken()
   const [, setTick] = useState(0)
   const [refreshando, setRefreshando] = useState(false)
@@ -60,17 +62,37 @@ export function StatusToken({ onSubstituir }: Props) {
   const aparencia = APARENCIA[estado]
   const restante = calcular(status?.expiraEm)
 
+  const conteudoChip = (
+    <>
+      <span className={cn('size-[7px] rounded-full shrink-0', aparencia.ponto)} />
+      <span>{aparencia.rotulo}</span>
+      {restante !== null && estado !== 'Ausente' && estado !== 'Expirado' && estado !== 'RefreshFalhou' && (
+        <span className="font-mono text-[11px] tabular-nums normal-case tracking-normal opacity-70 border-l border-current/20 pl-2 ml-0.5">renova em {formatarDuracao(restante)}</span>
+      )}
+    </>
+  )
+
+  const classesChip = cn(
+    'inline-flex items-center gap-2 px-2.5 h-[30px] rounded-full border text-[11px] font-semibold uppercase tracking-[0.04em] transition-colors',
+    aparencia.chip,
+  )
+
+  // Modo leitura — usuário normal só vê o estado, sem dropdown.
+  if (apenasLeitura) {
+    return (
+      <div
+        className={cn(classesChip, 'cursor-default')}
+        title={`Sessão Compras.gov.br · ${aparencia.rotulo}${restante !== null ? ` · ${formatarDuracao(restante)} restantes` : ''}`}
+      >
+        {conteudoChip}
+      </div>
+    )
+  }
+
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className={cn(
-        'inline-flex items-center gap-2 px-2.5 h-[30px] rounded-full border text-[11px] font-semibold uppercase tracking-[0.04em] transition-colors',
-        aparencia.chip,
-      )}>
-        <span className={cn('size-[7px] rounded-full shrink-0', aparencia.ponto)} />
-        <span>{aparencia.rotulo}</span>
-        {restante !== null && estado !== 'Ausente' && estado !== 'Expirado' && estado !== 'RefreshFalhou' && (
-          <span className="font-mono text-[11px] tabular-nums normal-case tracking-normal opacity-70 border-l border-current/20 pl-2 ml-0.5">renova em {formatarDuracao(restante)}</span>
-        )}
+      <DropdownMenuTrigger className={classesChip}>
+        {conteudoChip}
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" className="min-w-72">

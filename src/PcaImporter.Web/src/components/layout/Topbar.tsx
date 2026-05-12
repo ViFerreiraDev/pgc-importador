@@ -29,7 +29,7 @@ export function Topbar({ onAbrirDialogToken }: Props) {
 
         <div className="flex-1" />
 
-        {ehAdmin && <StatusToken onSubstituir={onAbrirDialogToken} />}
+        {usuario && <StatusToken onSubstituir={onAbrirDialogToken} apenasLeitura={!ehAdmin} />}
 
         {usuario && (
           <DropdownMenu>

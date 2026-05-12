@@ -87,7 +87,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
-app.MapHub<TokenHub>(TokenHub.Caminho).RequireAuthorization(p => p.RequireRole("Admin"));
+// Hub é read-only (apenas envia eventos). Qualquer usuário autenticado pode ouvir.
+app.MapHub<TokenHub>(TokenHub.Caminho).RequireAuthorization();
 
 app.MapFallbackToFile("index.html");
 
