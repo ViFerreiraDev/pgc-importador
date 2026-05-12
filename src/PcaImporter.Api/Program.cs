@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using PcaImporter.Api.Hubs;
 using PcaImporter.Infrastructure;
 
@@ -11,6 +12,25 @@ builder.Services.AddControllers().AddJsonOptions(opt =>
 });
 builder.Services.AddOpenApi();
 builder.Services.AddSignalR();
+
+// Persiste as chaves de Data Protection num diretório do volume.
+// Sem isso, cookies de auth seriam invalidados a cada restart do container.
+var caminhoChavesDP = builder.Configuration["DataProtection:KeysPath"]
+    ?? Environment.GetEnvironmentVariable("DP_KEYS_PATH")
+    ?? (OperatingSystem.IsLinux() ? "/data/dp-keys" : null);
+if (!string.IsNullOrWhiteSpace(caminhoChavesDP))
+{
+    try { Directory.CreateDirectory(caminhoChavesDP); }
+    catch { /* mantém ephemeral se não conseguir criar */ }
+
+    if (Directory.Exists(caminhoChavesDP))
+    {
+        builder.Services
+            .AddDataProtection()
+            .PersistKeysToFileSystem(new DirectoryInfo(caminhoChavesDP))
+            .SetApplicationName("PcaImporter");
+    }
+}
 
 // Cookie-based auth — sem Identity (rolamos hash próprio).
 builder.Services

@@ -1,17 +1,18 @@
 # ========================================================================
 #  Stack Portainer — PGC Saúde.Rio · Importador
 #
-#  Como subir no Portainer:
+#  Arquitetura: 1 container que serve tanto a API quanto o SPA (mesma porta).
+#  Acesso: http://subg:${PGC_PORT}
+#  Admin padrão no primeiro start: admin / admin123 (troque a senha após).
+#
+#  Como subir:
 #    1. Stacks → Add stack
 #    2. Web editor → cole o conteúdo deste arquivo
 #    3. Environment variables (opcional):
-#         PGC_PORT       porta de exposição no host (default 5062)
+#         PGC_PORT       porta de exposição no host (default 8800)
 #         PGC_VERSION    tag da imagem (default "latest")
 #         PCA_RESET_ADMIN  defina "1" só uma vez para resetar admin
 #    4. Deploy the stack
-#
-#  Acesso: http://subg:${PGC_PORT}
-#  Admin padrão no primeiro start: admin / admin123 (troque a senha após).
 # ========================================================================
 
 services:
@@ -19,7 +20,7 @@ services:
     image: windinxd/pgc-importador:${PGC_VERSION:-latest}
     container_name: pgc-importador
     ports:
-      - "${PGC_PORT:-5062}:8080"
+      - "${PGC_PORT:-8800}:8080"
     volumes:
       - pgc-data:/data
     environment:
@@ -27,7 +28,8 @@ services:
       # PCA_RESET_ADMIN: "1"   # descomente uma vez se esquecer a senha
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/auth/me"]
+      # "/" devolve o index.html do SPA (200). Não usar endpoint autenticado aqui.
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/"]
       interval: 30s
       timeout: 5s
       retries: 3
