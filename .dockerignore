@@ -15,8 +15,8 @@
 .gitignore
 .github
 
-# Dev DBs e arquivos locais
-*.db
+# Dev DBs e arquivos locais (mas mantém comprasgov.db — é base de referência)
+pca-importer.db
 *.db-shm
 *.db-wal
 *.log

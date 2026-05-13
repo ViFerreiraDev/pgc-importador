@@ -18,6 +18,7 @@ public sealed class ServicoImportacao : IServicoImportacao
     private readonly IRegistroLogs _logs;
     private readonly IHttpClientFactory _httpFactory;
     private readonly IRepositorioHistoricoImportacao _historico;
+    private readonly IRepositorioPrecosReferencia _precosRef;
     private readonly ILogger<ServicoImportacao> _log;
 
     // Mapa idExecucao -> contexto de origem (link + usuario), pra registrar histórico ao concluir.
@@ -33,6 +34,7 @@ public sealed class ServicoImportacao : IServicoImportacao
         IRegistroLogs logs,
         IHttpClientFactory httpFactory,
         IRepositorioHistoricoImportacao historico,
+        IRepositorioPrecosReferencia precosRef,
         ILogger<ServicoImportacao> log)
     {
         _dfd = dfd;
@@ -43,6 +45,7 @@ public sealed class ServicoImportacao : IServicoImportacao
         _logs = logs;
         _httpFactory = httpFactory;
         _historico = historico;
+        _precosRef = precosRef;
         _log = log;
     }
 
@@ -66,16 +69,18 @@ public sealed class ServicoImportacao : IServicoImportacao
                 TotalMateriais: entrada?.Materiais.Count ?? 0,
                 Erros: errosLeitura,
                 Avisos: Array.Empty<AvisoValidacao>(),
+                Divergencias: Array.Empty<DivergenciaValidacao>(),
                 Entrada: entrada
             ));
         }
 
-        var (errosVal, avisos) = ValidadorImportacao.Validar(entrada);
+        var (errosVal, avisos, divergencias) = ValidadorImportacao.Validar(entrada, _precosRef);
         return Task.FromResult(new ResultadoValidacaoImportacao(
             Valido: errosVal.Count == 0,
             TotalMateriais: entrada.Materiais.Count,
             Erros: errosVal,
             Avisos: avisos,
+            Divergencias: divergencias,
             Entrada: entrada
         ));
     }

@@ -4,10 +4,22 @@ namespace PcaImporter.Infrastructure.Importacao;
 
 public static class ValidadorImportacao
 {
-    public static (List<ErroValidacao> Erros, List<AvisoValidacao> Avisos) Validar(EntradaImportacaoDfd entrada)
+    /// <summary>Acima desse limiar (100% = preço dobrou ou caiu pela metade) emite divergência.</summary>
+    private const decimal LimiarPrecoPct = 1.00m;
+
+    /// <summary>Acima desse limiar (500% = qtd multiplicou por 6 ou ficou 1/6) emite divergência.</summary>
+    private const decimal LimiarQuantidadePct = 5.00m;
+
+    /// <summary>Ignora referências com poucas observações — ruído estatístico.</summary>
+    private const int MinRegistrosReferencia = 3;
+
+    public static (List<ErroValidacao> Erros, List<AvisoValidacao> Avisos, List<DivergenciaValidacao> Divergencias) Validar(
+        EntradaImportacaoDfd entrada,
+        IRepositorioPrecosReferencia? referencias = null)
     {
         var erros = new List<ErroValidacao>();
         var avisos = new List<AvisoValidacao>();
+        var divergencias = new List<DivergenciaValidacao>();
 
         // ----- Aba DFD -----
 
@@ -151,9 +163,92 @@ public static class ValidadorImportacao
                     erros.Add(new ErroValidacao("Materiais", "siglaUnidadeFornecimento",
                         "Sigla da unidade é obrigatória (ex: UN).", m.LinhaPlanilha));
                 }
+
+                // Divergência de preço/quantidade contra a base de referência (não bloqueia)
+                if (referencias is not null
+                    && m.Quantidade is { } qtd && qtd > 0
+                    && m.ValorUnitario is { } valor && valor > 0
+                    && int.TryParse(m.Codigo, out var codigoInt))
+                {
+                    AnalisarDivergencias(referencias, codigoInt, m.SiglaUnidadeFornecimento, qtd, valor, m.LinhaPlanilha, divergencias);
+                }
             }
         }
 
-        return (erros, avisos);
+        return (erros, avisos, divergencias);
+    }
+
+    private static void AnalisarDivergencias(
+        IRepositorioPrecosReferencia repo,
+        int codigo,
+        string? sigla,
+        decimal quantidade,
+        decimal valorUnitario,
+        int? linha,
+        List<DivergenciaValidacao> divergencias)
+    {
+        var refs = repo.BuscarPorCodigo(codigo);
+        if (refs.Count == 0) return;
+
+        // Filtra por significância estatística
+        var elegiveis = refs.Where(r => r.TotalRegistros >= MinRegistrosReferencia && r.PrecoMedio > 0).ToList();
+        if (elegiveis.Count == 0) return;
+
+        // Escolhe a referência mais adequada:
+        //   1) mesma sigla de unidade, se houver;
+        //   2) senão, a que tiver o preço mais próximo do informado (regra do usuário).
+        PrecoReferenciaDto? escolhida = null;
+        if (!string.IsNullOrWhiteSpace(sigla))
+        {
+            escolhida = elegiveis.FirstOrDefault(r =>
+                string.Equals(r.SiglaUnidadeFornecimento, sigla, StringComparison.OrdinalIgnoreCase));
+        }
+        if (escolhida is null)
+        {
+            escolhida = elegiveis.OrderBy(r => Math.Abs(r.PrecoMedio - valorUnitario)).First();
+        }
+
+        // Diferença percentual do preço unitário
+        var diffPreco = Math.Abs(valorUnitario - escolhida.PrecoMedio) / escolhida.PrecoMedio;
+        if (diffPreco >= LimiarPrecoPct)
+        {
+            var direcao = valorUnitario > escolhida.PrecoMedio ? "acima" : "abaixo";
+            divergencias.Add(new DivergenciaValidacao(
+                Local: "Materiais",
+                Linha: linha,
+                Codigo: codigo.ToString(),
+                Tipo: "preco",
+                ValorPlanilha: valorUnitario,
+                ValorReferencia: escolhida.PrecoMedio,
+                DiferencaPct: diffPreco,
+                SiglaReferencia: escolhida.SiglaUnidadeFornecimento,
+                TotalRegistros: escolhida.TotalRegistros,
+                Mensagem:
+                    $"Valor unitário R$ {valorUnitario:N2} está {diffPreco:P0} {direcao} da média histórica " +
+                    $"R$ {escolhida.PrecoMedio:N2} (base: {escolhida.TotalRegistros} registros, sigla {escolhida.SiglaUnidadeFornecimento})."));
+        }
+
+        // Diferença percentual da quantidade
+        if (escolhida.QuantidadeMedia > 0)
+        {
+            var diffQtd = Math.Abs(quantidade - escolhida.QuantidadeMedia) / escolhida.QuantidadeMedia;
+            if (diffQtd >= LimiarQuantidadePct)
+            {
+                var direcao = quantidade > escolhida.QuantidadeMedia ? "acima" : "abaixo";
+                divergencias.Add(new DivergenciaValidacao(
+                    Local: "Materiais",
+                    Linha: linha,
+                    Codigo: codigo.ToString(),
+                    Tipo: "qtd",
+                    ValorPlanilha: quantidade,
+                    ValorReferencia: escolhida.QuantidadeMedia,
+                    DiferencaPct: diffQtd,
+                    SiglaReferencia: escolhida.SiglaUnidadeFornecimento,
+                    TotalRegistros: escolhida.TotalRegistros,
+                    Mensagem:
+                        $"Quantidade {quantidade:N2} está {diffQtd:P0} {direcao} da média histórica " +
+                        $"{escolhida.QuantidadeMedia:N2} ({escolhida.SiglaUnidadeFornecimento}, {escolhida.TotalRegistros} registros)."));
+            }
+        }
     }
 }

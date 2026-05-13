@@ -70,6 +70,7 @@ public sealed class ImportacaoController : ControllerBase
                 resultado.TotalMateriais,
                 resultado.Erros,
                 resultado.Avisos,
+                resultado.Divergencias,
                 Duplicado = anterior is not null,
                 Anterior = anterior,
             });

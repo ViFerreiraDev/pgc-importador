@@ -40,6 +40,15 @@ public static class DependencyInjection
         services.AddSingleton<IServicoUsuarios, ServicoUsuarios>();
         services.AddHostedService<BootstrapAdminPadrao>();
 
+        // Base de referência de preços/quantitativos (somente leitura).
+        var caminhoRefDb = config["PrecosReferencia:CaminhoDb"]
+            ?? Environment.GetEnvironmentVariable("PCA_REF_DB")
+            ?? Path.Combine(AppContext.BaseDirectory, "comprasgov.db");
+        services.AddSingleton<IRepositorioPrecosReferencia>(sp =>
+            new RepositorioPrecosReferencia(
+                caminhoRefDb,
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RepositorioPrecosReferencia>>()));
+
         services.AddHttpClient<IComprasGovTokenClient, ComprasGovTokenClient>((sp, http) =>
         {
             var opcoes = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ComprasGovOptions>>().Value;

@@ -21,6 +21,21 @@ export interface AvisoValidacao {
   linha: number | null
 }
 
+export interface DivergenciaValidacao {
+  local: string
+  linha: number | null
+  codigo: string
+  /** "preco" | "qtd" */
+  tipo: 'preco' | 'qtd'
+  valorPlanilha: number
+  valorReferencia: number
+  /** 0.5 = 50% */
+  diferencaPct: number
+  siglaReferencia: string
+  totalRegistros: number
+  mensagem: string
+}
+
 export interface MetricasImportacao {
   totalPlanilhas: number
   totalItens: number
@@ -51,6 +66,7 @@ export interface ResultadoValidacao {
   totalMateriais: number
   erros: ErroValidacao[]
   avisos: AvisoValidacao[]
+  divergencias?: DivergenciaValidacao[]
   duplicado?: boolean
   anterior?: HistoricoImportacao | null
 }

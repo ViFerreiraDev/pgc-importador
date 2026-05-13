@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   Upload, ExternalLink, Play, FileSpreadsheet, AlertTriangle, CheckCircle2,
-  Loader2, Info, Plus, Link as LinkIcon, History, List,
+  Loader2, Info, Plus, Link as LinkIcon, History, List, Scale,
 } from 'lucide-react'
 import { PageHeader } from '@/components/comum/PageHeader'
 import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card'
@@ -391,6 +391,68 @@ function RelatorioValidacao({ r }: { r: ResultadoValidacao }) {
               </AlertDescription>
             </div>
           </Alert>
+        )}
+        {(r.divergencias?.length ?? 0) > 0 && (
+          <Card className="border-[hsl(20_85%_55%/0.45)] bg-[hsl(20_85%_55%/0.04)]">
+            <CardHeader className="border-b border-[hsl(20_85%_55%/0.25)]">
+              <div>
+                <CardTitle className="text-[hsl(20_85%_35%)]">
+                  <Scale className="!text-[hsl(20_85%_45%)]" />
+                  Divergência com a base histórica
+                </CardTitle>
+                <CardDescription className="text-[hsl(20_45%_30%)]">
+                  Não bloqueia a importação, mas vale conferir antes de subir — os valores estão fora do padrão histórico do Compras.gov.br.
+                </CardDescription>
+              </div>
+              <Badge className="bg-[hsl(20_85%_55%/0.15)] text-[hsl(20_85%_30%)] border border-[hsl(20_85%_55%/0.35)]">
+                <span className="size-1.5 rounded-full bg-[hsl(20_85%_50%)]" />
+                {r.divergencias!.length} {r.divergencias!.length === 1 ? 'divergência' : 'divergências'}
+              </Badge>
+            </CardHeader>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="text-left">
+                    <th className="px-3.5 py-2.5 text-[11px] uppercase tracking-[0.05em] font-semibold text-[hsl(20_45%_35%)] bg-[hsl(20_85%_55%/0.06)] border-b border-[hsl(20_85%_55%/0.2)] w-20">Linha</th>
+                    <th className="px-3.5 py-2.5 text-[11px] uppercase tracking-[0.05em] font-semibold text-[hsl(20_45%_35%)] bg-[hsl(20_85%_55%/0.06)] border-b border-[hsl(20_85%_55%/0.2)] w-28">Código</th>
+                    <th className="px-3.5 py-2.5 text-[11px] uppercase tracking-[0.05em] font-semibold text-[hsl(20_45%_35%)] bg-[hsl(20_85%_55%/0.06)] border-b border-[hsl(20_85%_55%/0.2)] w-20">Campo</th>
+                    <th className="px-3.5 py-2.5 text-[11px] uppercase tracking-[0.05em] font-semibold text-[hsl(20_45%_35%)] bg-[hsl(20_85%_55%/0.06)] border-b border-[hsl(20_85%_55%/0.2)] w-32 text-right">Planilha</th>
+                    <th className="px-3.5 py-2.5 text-[11px] uppercase tracking-[0.05em] font-semibold text-[hsl(20_45%_35%)] bg-[hsl(20_85%_55%/0.06)] border-b border-[hsl(20_85%_55%/0.2)] w-32 text-right">Histórico</th>
+                    <th className="px-3.5 py-2.5 text-[11px] uppercase tracking-[0.05em] font-semibold text-[hsl(20_45%_35%)] bg-[hsl(20_85%_55%/0.06)] border-b border-[hsl(20_85%_55%/0.2)] w-24 text-right">Δ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {r.divergencias!.map((d, idx) => (
+                    <tr key={idx} className="border-b border-[hsl(20_85%_55%/0.15)] last:border-b-0">
+                      <td className="px-3.5 py-3 font-mono text-[12px] text-muted-foreground tabular-nums">{d.linha ?? '—'}</td>
+                      <td className="px-3.5 py-3 font-mono text-[12px]">{d.codigo}</td>
+                      <td className="px-3.5 py-3">
+                        <span className="text-[10.5px] uppercase tracking-[0.05em] font-semibold text-[hsl(20_85%_35%)]">
+                          {d.tipo === 'preco' ? 'preço' : 'qtd'}
+                        </span>
+                      </td>
+                      <td className="px-3.5 py-3 font-mono text-[12.5px] tabular-nums text-right">
+                        {d.tipo === 'preco'
+                          ? d.valorPlanilha.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                          : d.valorPlanilha.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}
+                      </td>
+                      <td className="px-3.5 py-3 font-mono text-[12.5px] tabular-nums text-right text-muted-foreground">
+                        {d.tipo === 'preco'
+                          ? d.valorReferencia.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                          : d.valorReferencia.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}
+                        <span className="block text-[10px] text-muted-foreground">{d.totalRegistros} registros · {d.siglaReferencia}</span>
+                      </td>
+                      <td className="px-3.5 py-3 font-mono text-[12.5px] tabular-nums text-right">
+                        <span className={d.valorPlanilha > d.valorReferencia ? 'text-[hsl(20_85%_35%)] font-semibold' : 'text-[hsl(20_45%_35%)]'}>
+                          {d.valorPlanilha > d.valorReferencia ? '+' : '−'}{(d.diferencaPct * 100).toFixed(0)}%
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
         )}
         {r.avisos.length > 0 && (
           <Card>

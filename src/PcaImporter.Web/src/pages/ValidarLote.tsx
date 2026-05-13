@@ -213,8 +213,9 @@ export function ValidarLote() {
                   <Th className="w-[100px]">Status</Th>
                   <Th className="w-[180px]">Rótulo</Th>
                   <Th>Link</Th>
-                  <Th className="w-[100px] text-right">Materiais</Th>
-                  <Th className="w-[90px] text-right">Avisos</Th>
+                  <Th className="w-[90px] text-right">Materiais</Th>
+                  <Th className="w-[100px] text-right">Divergências</Th>
+                  <Th className="w-[80px] text-right">Avisos</Th>
                   <Th className="w-[110px] text-right">Ações</Th>
                 </tr>
               </thead>
@@ -241,6 +242,13 @@ export function ValidarLote() {
                         {r.resultado ? r.resultado.totalMateriais.toLocaleString('pt-BR') : '—'}
                       </Td>
                       <Td className="text-right font-mono tabular-nums">
+                        {r.resultado ? (
+                          (r.resultado.divergencias?.length ?? 0) > 0 ? (
+                            <span className="font-semibold text-[hsl(20_85%_35%)]">{r.resultado.divergencias!.length}</span>
+                          ) : '0'
+                        ) : '—'}
+                      </Td>
+                      <Td className="text-right font-mono tabular-nums">
                         {r.resultado ? r.resultado.avisos.length : '—'}
                       </Td>
                       <Td className="text-right">
@@ -250,7 +258,11 @@ export function ValidarLote() {
                               <RotateCw />
                             </Button>
                           )}
-                          {(r.estado === 'invalido' || r.estado === 'erro' || (r.estado === 'valido' && (r.resultado?.avisos.length ?? 0) > 0)) && (
+                          {(r.estado === 'invalido' || r.estado === 'erro'
+                            || (r.estado === 'valido' && (
+                              (r.resultado?.avisos.length ?? 0) > 0
+                              || (r.resultado?.divergencias?.length ?? 0) > 0
+                            ))) && (
                             <Button variant="ghost" size="xs" onClick={() => setDetalhes({ link: l, r })}>
                               Detalhes
                             </Button>
@@ -378,6 +390,52 @@ function DialogDetalhes({
                           <td className="px-2.5 py-1.5 font-mono text-[11px] tabular-nums">{e.linha ?? '—'}</td>
                           <td className="px-2.5 py-1.5 font-mono text-[11px]">{e.campo}</td>
                           <td className="px-2.5 py-1.5">{e.mensagem}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {item.r.resultado && (item.r.resultado.divergencias?.length ?? 0) > 0 && (
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.06em] font-semibold text-[hsl(20_85%_35%)] mb-1.5">
+                  {item.r.resultado.divergencias!.length} {item.r.resultado.divergencias!.length === 1 ? 'divergência' : 'divergências'} c/ histórico
+                </div>
+                <div className="border border-[hsl(20_85%_55%/0.3)] rounded-md overflow-hidden">
+                  <table className="w-full text-[12.5px]">
+                    <thead>
+                      <tr className="bg-[hsl(20_85%_55%/0.08)]">
+                        <th className="px-2.5 py-1.5 text-left text-[10px] uppercase font-semibold text-[hsl(20_85%_30%)]">Linha</th>
+                        <th className="px-2.5 py-1.5 text-left text-[10px] uppercase font-semibold text-[hsl(20_85%_30%)]">Código</th>
+                        <th className="px-2.5 py-1.5 text-left text-[10px] uppercase font-semibold text-[hsl(20_85%_30%)]">Campo</th>
+                        <th className="px-2.5 py-1.5 text-right text-[10px] uppercase font-semibold text-[hsl(20_85%_30%)]">Planilha</th>
+                        <th className="px-2.5 py-1.5 text-right text-[10px] uppercase font-semibold text-[hsl(20_85%_30%)]">Histórico</th>
+                        <th className="px-2.5 py-1.5 text-right text-[10px] uppercase font-semibold text-[hsl(20_85%_30%)]">Δ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {item.r.resultado.divergencias!.map((d, idx) => (
+                        <tr key={idx} className="border-t border-[hsl(20_85%_55%/0.2)]">
+                          <td className="px-2.5 py-1.5 font-mono text-[11px] tabular-nums">{d.linha ?? '—'}</td>
+                          <td className="px-2.5 py-1.5 font-mono text-[11px]">{d.codigo}</td>
+                          <td className="px-2.5 py-1.5 text-[10px] uppercase font-semibold text-[hsl(20_85%_35%)]">{d.tipo === 'preco' ? 'preço' : 'qtd'}</td>
+                          <td className="px-2.5 py-1.5 font-mono text-[11px] tabular-nums text-right">
+                            {d.tipo === 'preco'
+                              ? d.valorPlanilha.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                              : d.valorPlanilha.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="px-2.5 py-1.5 font-mono text-[11px] tabular-nums text-right text-muted-foreground">
+                            {d.tipo === 'preco'
+                              ? d.valorReferencia.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                              : d.valorReferencia.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}
+                          </td>
+                          <td className="px-2.5 py-1.5 font-mono text-[11px] tabular-nums text-right">
+                            <span className={d.valorPlanilha > d.valorReferencia ? 'text-[hsl(20_85%_35%)] font-semibold' : 'text-[hsl(20_45%_35%)]'}>
+                              {d.valorPlanilha > d.valorReferencia ? '+' : '−'}{(d.diferencaPct * 100).toFixed(0)}%
+                            </span>
+                          </td>
                         </tr>
                       ))}
                     </tbody>

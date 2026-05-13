@@ -23,6 +23,14 @@
     <ProjectReference Include="..\PcaImporter.Infrastructure\PcaImporter.Infrastructure.csproj" />
   </ItemGroup>
 
+  <!-- Base de preços/quantitativos de referência (read-only) — vai junto no publish. -->
+  <ItemGroup>
+    <Content Include="comprasgov.db">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
   <Target Name="DebugEnsureNodeEnv" BeforeTargets="Build" Condition=" '$(Configuration)' == 'Debug' And !Exists('$(SpaRoot)node_modules') ">
     <Message Importance="high" Text="Restoring dependencies using 'npm'. This may take several minutes..." />
     <Exec WorkingDirectory="$(SpaRoot)" Command="npm install" />
