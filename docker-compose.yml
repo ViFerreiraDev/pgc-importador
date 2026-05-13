@@ -9,10 +9,9 @@ services:
       - "5062:8080"
     volumes:
       - pca-data:/data
-      # Base de referência de preços (read-only). Atualize o arquivo no host
-      # e dê `docker compose restart pca` para o container ler a versão nova,
-      # sem precisar rebuild da imagem.
-      - ./src/PcaImporter.Api/comprasgov.db:/app/comprasgov.db:ro
+      # comprasgov.db é embutido na imagem via Content do .csproj.
+      # Para atualizar: substitua o arquivo no repo, commit/push e rebuild
+      # (`docker compose up -d --build`).
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       # Defina pra resetar a senha do admin para "admin123" no próximo start.
