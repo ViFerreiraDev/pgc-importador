@@ -4,6 +4,7 @@ import {
   Loader2, Info, Plus, Link as LinkIcon, History, List, Scale,
 } from 'lucide-react'
 import { PageHeader } from '@/components/comum/PageHeader'
+import { LinkCodigoBr } from '@/components/comum/LinkCodigoBr'
 import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -425,7 +426,7 @@ function RelatorioValidacao({ r }: { r: ResultadoValidacao }) {
                   {r.divergencias!.map((d, idx) => (
                     <tr key={idx} className="border-b border-[hsl(20_85%_55%/0.15)] last:border-b-0">
                       <td className="px-3.5 py-3 font-mono text-[12px] text-muted-foreground tabular-nums">{d.linha ?? '—'}</td>
-                      <td className="px-3.5 py-3 font-mono text-[12px]">{d.codigo}</td>
+                      <td className="px-3.5 py-3 font-mono text-[12px]"><LinkCodigoBr codigo={d.codigo} /></td>
                       <td className="px-3.5 py-3">
                         <span className="text-[10.5px] uppercase tracking-[0.05em] font-semibold text-[hsl(20_85%_35%)]">
                           {d.tipo === 'preco' ? 'preço' : 'qtd'}
