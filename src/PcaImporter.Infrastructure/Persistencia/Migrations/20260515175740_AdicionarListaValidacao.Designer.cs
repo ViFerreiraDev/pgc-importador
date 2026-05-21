@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PcaImporter.Infrastructure.Persistencia;
 
@@ -10,9 +11,11 @@ using PcaImporter.Infrastructure.Persistencia;
 namespace PcaImporter.Infrastructure.Persistencia.Migrations
 {
     [DbContext(typeof(PcaDbContext))]
-    partial class PcaDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260515175740_AdicionarListaValidacao")]
+    partial class AdicionarListaValidacao
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.11");
@@ -215,10 +218,6 @@ namespace PcaImporter.Infrastructure.Persistencia.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("Classe")
-                        .HasMaxLength(40)
-                        .HasColumnType("TEXT");
-
                     b.Property<DateTimeOffset>("CriadoEm")
                         .HasColumnType("TEXT");
 
@@ -244,9 +243,6 @@ namespace PcaImporter.Infrastructure.Persistencia.Migrations
                     b.Property<string>("MensagemErro")
                         .HasColumnType("TEXT");
 
-                    b.Property<int?>("NumeroGrupo")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("Rotulo")
                         .HasColumnType("TEXT");
 
@@ -267,10 +263,6 @@ namespace PcaImporter.Infrastructure.Persistencia.Migrations
                     b.HasIndex("IdPlanilha")
                         .IsUnique()
                         .HasFilter("\"ExcluidoEm\" IS NULL");
-
-                    b.HasIndex("Classe", "NumeroGrupo")
-                        .IsUnique()
-                        .HasFilter("\"ExcluidoEm\" IS NULL AND \"Classe\" IS NOT NULL AND \"NumeroGrupo\" IS NOT NULL");
 
                     b.ToTable("lista_link", (string)null);
                 });

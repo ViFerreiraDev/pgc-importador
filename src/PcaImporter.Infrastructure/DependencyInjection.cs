@@ -10,7 +10,9 @@ using PcaImporter.Application.Importacao;
 using PcaImporter.Application.Logs;
 using PcaImporter.Application.Token;
 using PcaImporter.Application.Usuarios;
+using PcaImporter.Application.Validacao;
 using PcaImporter.Infrastructure.Catalogo;
+using PcaImporter.Infrastructure.Validacao;
 using PcaImporter.Infrastructure.Compras;
 using PcaImporter.Infrastructure.Compras.Catalogo;
 using PcaImporter.Infrastructure.Compras.Dfd;
@@ -100,6 +102,8 @@ public static class DependencyInjection
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
         });
         services.AddSingleton<IServicoSincronizacaoCatalogo, ServicoSincronizacaoCatalogo>();
+
+        services.AddSingleton<IServicoListaValidacao, ServicoListaValidacao>();
 
         return services;
     }

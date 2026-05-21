@@ -13,6 +13,9 @@ public class PcaDbContext : DbContext
     public DbSet<HistoricoImportacaoEntity> HistoricoImportacoes => Set<HistoricoImportacaoEntity>();
     public DbSet<CatalogoMaterialEntity> CatalogoMateriais => Set<CatalogoMaterialEntity>();
     public DbSet<UsuarioEntity> Usuarios => Set<UsuarioEntity>();
+    public DbSet<ListaLinkEntity> ListaLinks => Set<ListaLinkEntity>();
+    public DbSet<ListaItemEntity> ListaItens => Set<ListaItemEntity>();
+    public DbSet<ListaItemRevisaoEntity> ListaItemRevisoes => Set<ListaItemRevisaoEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -61,6 +64,52 @@ public class PcaDbContext : DbContext
             b.Property(x => x.DescricaoItem).IsRequired();
             b.HasIndex(x => x.CodigoClasse);
             b.HasIndex(x => x.CodigoPdm);
+        });
+
+        modelBuilder.Entity<ListaLinkEntity>(b =>
+        {
+            b.ToTable("lista_link");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Url).IsRequired();
+            b.Property(x => x.IdPlanilha).IsRequired().HasMaxLength(120);
+            b.Property(x => x.Estado).IsRequired().HasMaxLength(20);
+            b.Property(x => x.Classe).HasMaxLength(40);
+            // índice parcial p/ "qual está ativo" — SQLite suporta WHERE
+            b.HasIndex(x => x.IdPlanilha)
+                .IsUnique()
+                .HasFilter("\"ExcluidoEm\" IS NULL");
+            // Unicidade de (Classe, NumeroGrupo) entre ativos
+            b.HasIndex(x => new { x.Classe, x.NumeroGrupo })
+                .IsUnique()
+                .HasFilter("\"ExcluidoEm\" IS NULL AND \"Classe\" IS NOT NULL AND \"NumeroGrupo\" IS NOT NULL");
+            b.HasIndex(x => x.ExcluidoEm);
+        });
+
+        modelBuilder.Entity<ListaItemEntity>(b =>
+        {
+            b.ToTable("lista_item");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Tipo).IsRequired().HasMaxLength(20);
+            b.Property(x => x.Fingerprint).IsRequired().HasMaxLength(64);
+            b.Property(x => x.PayloadJson).IsRequired();
+            b.HasOne(x => x.Link)
+                .WithMany(l => l.Itens)
+                .HasForeignKey(x => x.LinkId)
+                .OnDelete(DeleteBehavior.Cascade);
+            b.HasIndex(x => new { x.LinkId, x.Fingerprint }).IsUnique();
+            b.HasIndex(x => x.LinkId);
+            b.HasIndex(x => x.Tipo);
+        });
+
+        modelBuilder.Entity<ListaItemRevisaoEntity>(b =>
+        {
+            b.ToTable("lista_item_revisao");
+            b.HasKey(x => new { x.ItemId, x.RevisadoPorLogin });
+            b.Property(x => x.RevisadoPorLogin).IsRequired().HasMaxLength(60);
+            b.HasOne(x => x.Item)
+                .WithMany(i => i.Revisoes)
+                .HasForeignKey(x => x.ItemId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

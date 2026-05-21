@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using PcaImporter.Api.Hubs;
+using PcaImporter.Application.Validacao;
 using PcaImporter.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -70,6 +71,7 @@ builder.Services.AddAuthorization();
 builder.Services.AdicionarInfrastructure(builder.Configuration);
 
 builder.Services.AddHostedService<TokenHubBroadcaster>();
+builder.Services.AddSingleton<IEventosListaValidacao, ListaValidacaoBroadcaster>();
 
 var app = builder.Build();
 
@@ -89,6 +91,7 @@ app.UseAuthorization();
 app.MapControllers();
 // Hub é read-only (apenas envia eventos). Qualquer usuário autenticado pode ouvir.
 app.MapHub<TokenHub>(TokenHub.Caminho).RequireAuthorization();
+app.MapHub<ListaValidacaoHub>(ListaValidacaoHub.Caminho).RequireAuthorization();
 
 app.MapFallbackToFile("index.html");
 
