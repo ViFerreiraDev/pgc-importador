@@ -23,9 +23,9 @@ public sealed record AvisoValidacao(
 );
 
 /// <summary>
-/// Divergência informativa entre o valor da planilha e a referência histórica do
-/// Compras.gov.br. Não bloqueia a importação — é só um sinal pra revisão humana
-/// quando a diferença for considerável.
+/// Divergência informativa entre o valor da planilha e a faixa histórica do
+/// Compras.gov.br (preço mínimo/máximo + margem 50%). Não bloqueia a importação —
+/// é só um sinal pra revisão humana quando o valor está fora da banda esperada.
 /// </summary>
 public sealed record DivergenciaValidacao(
     string Local,
@@ -34,8 +34,11 @@ public sealed record DivergenciaValidacao(
     /// <summary>"preco" ou "qtd"</summary>
     string Tipo,
     decimal ValorPlanilha,
-    decimal ValorReferencia,
-    /// <summary>Diferença relativa (0.5 = 50% acima/abaixo).</summary>
+    /// <summary>Limite inferior da banda histórica (min × 0.5).</summary>
+    decimal ReferenciaMin,
+    /// <summary>Limite superior da banda histórica (max × 1.5).</summary>
+    decimal ReferenciaMax,
+    /// <summary>Diferença relativa em relação ao limite ultrapassado (positivo = acima do max, negativo = abaixo do min).</summary>
     decimal DiferencaPct,
     string SiglaReferencia,
     int TotalRegistros,

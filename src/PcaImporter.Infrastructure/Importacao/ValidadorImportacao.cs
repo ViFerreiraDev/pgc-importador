@@ -4,11 +4,8 @@ namespace PcaImporter.Infrastructure.Importacao;
 
 public static class ValidadorImportacao
 {
-    /// <summary>Acima desse limiar (100% = preço dobrou ou caiu pela metade) emite divergência.</summary>
-    private const decimal LimiarPrecoPct = 1.00m;
-
-    /// <summary>Acima desse limiar (500% = qtd multiplicou por 6 ou ficou 1/6) emite divergência.</summary>
-    private const decimal LimiarQuantidadePct = 5.00m;
+    /// <summary>Margem aceita acima do preço máximo e abaixo do preço mínimo (50%).</summary>
+    private const decimal MargemBanda = 0.50m;
 
     /// <summary>Ignora referências com poucas observações — ruído estatístico.</summary>
     private const int MinRegistrosReferencia = 3;
@@ -190,64 +187,102 @@ public static class ValidadorImportacao
         var refs = repo.BuscarPorCodigo(codigo);
         if (refs.Count == 0) return;
 
-        // Filtra por significância estatística
-        var elegiveis = refs.Where(r => r.TotalRegistros >= MinRegistrosReferencia && r.PrecoMedio > 0).ToList();
+        // Filtra por significância estatística — precisa ter min e max válidos.
+        var elegiveis = refs
+            .Where(r => r.TotalRegistros >= MinRegistrosReferencia && r.PrecoMax > 0)
+            .ToList();
         if (elegiveis.Count == 0) return;
 
         // Escolhe a referência mais adequada:
         //   1) mesma sigla de unidade, se houver;
-        //   2) senão, a que tiver o preço mais próximo do informado (regra do usuário).
+        //   2) senão, a que tiver o preço máximo mais próximo do informado (regra do usuário:
+        //      "usar o preço mais próximo para definir a diferença").
         PrecoReferenciaDto? escolhida = null;
         if (!string.IsNullOrWhiteSpace(sigla))
         {
             escolhida = elegiveis.FirstOrDefault(r =>
                 string.Equals(r.SiglaUnidadeFornecimento, sigla, StringComparison.OrdinalIgnoreCase));
         }
-        if (escolhida is null)
-        {
-            escolhida = elegiveis.OrderBy(r => Math.Abs(r.PrecoMedio - valorUnitario)).First();
-        }
+        escolhida ??= elegiveis
+            .OrderBy(r => Math.Abs(r.PrecoMax - valorUnitario))
+            .First();
 
-        // Diferença percentual do preço unitário
-        var diffPreco = Math.Abs(valorUnitario - escolhida.PrecoMedio) / escolhida.PrecoMedio;
-        if (diffPreco >= LimiarPrecoPct)
+        // Banda de preço aceita: [min × (1 - margem), max × (1 + margem)]
+        var bandaBaixaPreco = escolhida.PrecoMin * (1m - MargemBanda);
+        var bandaAltaPreco = escolhida.PrecoMax * (1m + MargemBanda);
+
+        var precoForaDaBanda = valorUnitario < bandaBaixaPreco || valorUnitario > bandaAltaPreco;
+
+        if (precoForaDaBanda)
         {
-            var direcao = valorUnitario > escolhida.PrecoMedio ? "acima" : "abaixo";
+            // Diferença em relação ao limite ultrapassado.
+            decimal diffPct;
+            string direcao;
+            if (valorUnitario > bandaAltaPreco)
+            {
+                diffPct = (valorUnitario - escolhida.PrecoMax) / escolhida.PrecoMax;
+                direcao = "acima do máximo histórico";
+            }
+            else
+            {
+                // valorUnitario < bandaBaixaPreco
+                diffPct = -(escolhida.PrecoMin - valorUnitario) / Math.Max(escolhida.PrecoMin, 0.0001m);
+                direcao = "abaixo do mínimo histórico";
+            }
+
             divergencias.Add(new DivergenciaValidacao(
                 Local: "Materiais",
                 Linha: linha,
                 Codigo: codigo.ToString(),
                 Tipo: "preco",
                 ValorPlanilha: valorUnitario,
-                ValorReferencia: escolhida.PrecoMedio,
-                DiferencaPct: diffPreco,
+                ReferenciaMin: escolhida.PrecoMin,
+                ReferenciaMax: escolhida.PrecoMax,
+                DiferencaPct: diffPct,
                 SiglaReferencia: escolhida.SiglaUnidadeFornecimento,
                 TotalRegistros: escolhida.TotalRegistros,
                 Mensagem:
-                    $"Valor unitário R$ {valorUnitario:N2} está {diffPreco:P0} {direcao} da média histórica " +
-                    $"R$ {escolhida.PrecoMedio:N2} (base: {escolhida.TotalRegistros} registros, sigla {escolhida.SiglaUnidadeFornecimento})."));
+                    $"Valor unitário R$ {valorUnitario:N2} {direcao} " +
+                    $"R$ {escolhida.PrecoMin:N2} – R$ {escolhida.PrecoMax:N2} " +
+                    $"(base: {escolhida.TotalRegistros} registros, sigla {escolhida.SiglaUnidadeFornecimento})."));
         }
 
-        // Diferença percentual da quantidade
-        if (escolhida.QuantidadeMedia > 0)
+        // Regra do usuário: quantidade só é criticada quando o PREÇO também estiver fora da banda.
+        // Se o preço bate, a divergência de qtd não é emitida.
+        if (precoForaDaBanda && escolhida.QuantidadeMax > 0)
         {
-            var diffQtd = Math.Abs(quantidade - escolhida.QuantidadeMedia) / escolhida.QuantidadeMedia;
-            if (diffQtd >= LimiarQuantidadePct)
+            var bandaBaixaQtd = escolhida.QuantidadeMin * (1m - MargemBanda);
+            var bandaAltaQtd = escolhida.QuantidadeMax * (1m + MargemBanda);
+            if (quantidade < bandaBaixaQtd || quantidade > bandaAltaQtd)
             {
-                var direcao = quantidade > escolhida.QuantidadeMedia ? "acima" : "abaixo";
+                decimal diffPct;
+                string direcao;
+                if (quantidade > bandaAltaQtd)
+                {
+                    diffPct = (quantidade - escolhida.QuantidadeMax) / Math.Max(escolhida.QuantidadeMax, 0.0001m);
+                    direcao = "acima do máximo histórico";
+                }
+                else
+                {
+                    diffPct = -(escolhida.QuantidadeMin - quantidade) / Math.Max(escolhida.QuantidadeMin, 0.0001m);
+                    direcao = "abaixo do mínimo histórico";
+                }
+
                 divergencias.Add(new DivergenciaValidacao(
                     Local: "Materiais",
                     Linha: linha,
                     Codigo: codigo.ToString(),
                     Tipo: "qtd",
                     ValorPlanilha: quantidade,
-                    ValorReferencia: escolhida.QuantidadeMedia,
-                    DiferencaPct: diffQtd,
+                    ReferenciaMin: escolhida.QuantidadeMin,
+                    ReferenciaMax: escolhida.QuantidadeMax,
+                    DiferencaPct: diffPct,
                     SiglaReferencia: escolhida.SiglaUnidadeFornecimento,
                     TotalRegistros: escolhida.TotalRegistros,
                     Mensagem:
-                        $"Quantidade {quantidade:N2} está {diffQtd:P0} {direcao} da média histórica " +
-                        $"{escolhida.QuantidadeMedia:N2} ({escolhida.SiglaUnidadeFornecimento}, {escolhida.TotalRegistros} registros)."));
+                        $"Quantidade {quantidade:N2} {direcao} " +
+                        $"{escolhida.QuantidadeMin:N2} – {escolhida.QuantidadeMax:N2} " +
+                        $"({escolhida.SiglaUnidadeFornecimento}, {escolhida.TotalRegistros} registros)."));
             }
         }
     }

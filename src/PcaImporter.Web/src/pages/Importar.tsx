@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { PageHeader } from '@/components/comum/PageHeader'
 import { LinkCodigoBr } from '@/components/comum/LinkCodigoBr'
+import { formatarBanda } from '@/features/importacao/formatDivergencia'
 import { Card, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -438,14 +439,12 @@ function RelatorioValidacao({ r }: { r: ResultadoValidacao }) {
                           : d.valorPlanilha.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}
                       </td>
                       <td className="px-3.5 py-3 font-mono text-[12.5px] tabular-nums text-right text-muted-foreground">
-                        {d.tipo === 'preco'
-                          ? d.valorReferencia.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-                          : d.valorReferencia.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}
+                        {formatarBanda(d)}
                         <span className="block text-[10px] text-muted-foreground">{d.totalRegistros} registros · {d.siglaReferencia}</span>
                       </td>
                       <td className="px-3.5 py-3 font-mono text-[12.5px] tabular-nums text-right">
-                        <span className={d.valorPlanilha > d.valorReferencia ? 'text-[hsl(20_85%_35%)] font-semibold' : 'text-[hsl(20_45%_35%)]'}>
-                          {d.valorPlanilha > d.valorReferencia ? '+' : '−'}{(d.diferencaPct * 100).toFixed(0)}%
+                        <span className={d.diferencaPct >= 0 ? 'text-[hsl(20_85%_35%)] font-semibold' : 'text-[hsl(20_45%_35%)]'}>
+                          {d.diferencaPct >= 0 ? '+' : '−'}{(Math.abs(d.diferencaPct) * 100).toFixed(0)}%
                         </span>
                       </td>
                     </tr>

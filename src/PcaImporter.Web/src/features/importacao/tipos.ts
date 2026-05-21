@@ -28,8 +28,11 @@ export interface DivergenciaValidacao {
   /** "preco" | "qtd" */
   tipo: 'preco' | 'qtd'
   valorPlanilha: number
-  valorReferencia: number
-  /** 0.5 = 50% */
+  /** Limite inferior aceito (min × 0.5) */
+  referenciaMin: number
+  /** Limite superior aceito (max × 1.5) */
+  referenciaMax: number
+  /** Sinalizado: positivo se acima do máximo, negativo se abaixo do mínimo */
   diferencaPct: number
   siglaReferencia: string
   totalRegistros: number
