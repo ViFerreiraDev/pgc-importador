@@ -90,7 +90,9 @@ export function Sidebar() {
           >
             API docs ↗
           </a>
-          <span className="font-mono">v0.1 · interno</span>
+          <span className="font-mono tabular-nums" title={`build ${__BUILD_DATE__}`}>
+            v{__APP_VERSION__}
+          </span>
         </div>
       </div>
     </aside>
