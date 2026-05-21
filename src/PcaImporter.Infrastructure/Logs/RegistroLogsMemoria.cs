@@ -16,11 +16,11 @@ public sealed class RegistroLogsMemoria : IRegistroLogs
         _tempo = tempo;
     }
 
-    public void Registrar(NivelLog nivel, string categoria, string mensagem, string? detalhes = null)
+    public void Registrar(NivelLog nivel, string categoria, string mensagem, string? detalhes = null, string? usuarioLogin = null)
     {
         lock (_trava)
         {
-            var evento = new LogEvento(_proximoId++, _tempo.GetUtcNow(), nivel, categoria, mensagem, detalhes);
+            var evento = new LogEvento(_proximoId++, _tempo.GetUtcNow(), nivel, categoria, mensagem, detalhes, usuarioLogin);
             _eventos.AddFirst(evento);
             while (_eventos.Count > Capacidade)
             {

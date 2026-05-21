@@ -132,6 +132,7 @@ export function Logs() {
                 <TableHead className="w-32">Quando</TableHead>
                 <TableHead className="w-24">Nível</TableHead>
                 <TableHead className="w-28">Categoria</TableHead>
+                <TableHead className="w-32">Usuário</TableHead>
                 <TableHead>Mensagem</TableHead>
               </TableRow>
             </TableHeader>
@@ -148,6 +149,9 @@ export function Logs() {
                     </span>
                   </TableCell>
                   <TableCell><Badge variant="outline" className="text-[10px]">{log.categoria}</Badge></TableCell>
+                  <TableCell className="font-mono text-[11px] text-muted-foreground whitespace-nowrap">
+                    {log.usuarioLogin ?? '—'}
+                  </TableCell>
                   <TableCell>
                     <div className="text-sm">{log.mensagem}</div>
                     {log.detalhes && (

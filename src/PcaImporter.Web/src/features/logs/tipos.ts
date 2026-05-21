@@ -14,6 +14,7 @@ export interface LogEvento {
   categoria: string
   mensagem: string
   detalhes: string | null
+  usuarioLogin: string | null
 }
 
 export interface PaginaLogs {

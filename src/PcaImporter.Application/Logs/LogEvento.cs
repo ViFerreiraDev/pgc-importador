@@ -6,7 +6,8 @@ public sealed record LogEvento(
     NivelLog Nivel,
     string Categoria,
     string Mensagem,
-    string? Detalhes
+    string? Detalhes,
+    string? UsuarioLogin = null
 );
 
 public enum NivelLog
