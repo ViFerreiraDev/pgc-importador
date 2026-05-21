@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import {
-  AlertTriangle, CheckCircle2, Eraser, ExternalLink, Loader2, ListChecks, RotateCw, Scale, Search, XCircle,
+  AlertTriangle, CheckCircle2, Eraser, ExternalLink, Loader2, ListChecks, Play,
+  RotateCw, Scale, Search, Shield, Trash2, Upload, XCircle,
 } from 'lucide-react'
 import { PageHeader } from '@/components/comum/PageHeader'
 import { LinkCodigoBr } from '@/components/comum/LinkCodigoBr'
@@ -12,610 +13,914 @@ import { Input, Textarea } from '@/components/ui/input'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-import { importacaoApi } from '@/features/importacao/importacaoApi'
-import type { DivergenciaValidacao, ErroValidacao, ResultadoValidacao } from '@/features/importacao/tipos'
+import { ProvedorListaValidacao, useListaValidacao } from '@/features/validacao/ListaValidacaoContext'
+import type { AusenteLote, DiffLote, DuplicadoLote, EstadoLink, GapClasse, ItemValidacao, LinkValidacao, PayloadDivergencia } from '@/features/validacao/tipos'
+import { CLASSES_PADRAO, decodificarPayload } from '@/features/validacao/tipos'
+import { useAuth } from '@/features/auth/AuthContext'
+import { useToken } from '@/features/token/TokenContext'
 import { cn } from '@/lib/utils'
 
-const PADRAO_SHEETS_URL = /(?:https?|htps):\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_-]+)[^\s)]*/g
-
-interface LinkExtraido {
-  rotulo: string
-  url: string
-  urlOriginal: string
-  idPlanilha: string
-}
-
-type Estado = 'pendente' | 'validando' | 'valido' | 'invalido' | 'erro'
-
-interface ResultadoLink {
-  estado: Estado
-  resultado?: ResultadoValidacao
-  mensagemErro?: string
-}
-
-interface ErroAgregado {
-  link: LinkExtraido
-  erro: ErroValidacao
-}
-
-interface DivergenciaAgregada {
-  link: LinkExtraido
-  divergencia: DivergenciaValidacao
-}
-
 export function ValidarLote() {
+  return (
+    <ProvedorListaValidacao>
+      <Conteudo />
+    </ProvedorListaValidacao>
+  )
+}
+
+function Conteudo() {
+  const { ativos, lixeira, gaps, carregando, erro, adicionarLink, compararLote, validar, alternarRevisao } = useListaValidacao()
+  const { usuario, ehAdmin } = useAuth()
+  const { status: tokenStatus } = useToken()
+  const sessaoCompras = tokenStatus?.estado === 'Saudavel'
+  const meuLogin = usuario?.login
+
+  const [aba, setAba] = useState<'ativos' | 'lixeira'>('ativos')
   const [texto, setTexto] = useState('')
-  const [links, setLinks] = useState<LinkExtraido[]>([])
-  const [resultados, setResultados] = useState<Map<string, ResultadoLink>>(new Map())
-  const [executando, setExecutando] = useState(false)
+  const [classeLote, setClasseLote] = useState<string>('INSUMOS')
+  const [extraindo, setExtraindo] = useState(false)
+  const [erroExtracao, setErroExtracao] = useState<string | null>(null)
+  const [diffRecente, setDiffRecente] = useState<DiffLote | null>(null)
+  const [validandoTodos, setValidandoTodos] = useState(false)
   const [progresso, setProgresso] = useState({ feitos: 0, total: 0 })
-  const [detalhes, setDetalhes] = useState<{ link: LinkExtraido; r: ResultadoLink } | null>(null)
+  const [detalhes, setDetalhes] = useState<LinkValidacao | null>(null)
   const [modalGlobal, setModalGlobal] = useState<'erros' | 'divergencias' | null>(null)
+  const [unitarioAberto, setUnitarioAberto] = useState(false)
+  const [modoValidar, setModoValidar] = useState<'pendentes' | 'validos' | 'todos'>('pendentes')
+  const [filtroClasse, setFiltroClasse] = useState<string>('todas')
+  const [filtroBusca, setFiltroBusca] = useState<string>('')
+  const [filtroSoErros, setFiltroSoErros] = useState(false)
 
-  function extrair() {
-    const extraidos = extrairLinks(texto)
-    setLinks(extraidos)
-    const mapa = new Map<string, ResultadoLink>()
-    for (const l of extraidos) mapa.set(l.idPlanilha, { estado: 'pendente' })
-    setResultados(mapa)
-  }
-
-  function limpar() {
-    setTexto('')
-    setLinks([])
-    setResultados(new Map())
-    setProgresso({ feitos: 0, total: 0 })
-  }
-
-  async function rodarValidacao(alvos: LinkExtraido[]) {
-    if (alvos.length === 0) return
-    setExecutando(true)
-    setProgresso({ feitos: 0, total: alvos.length })
-
-    // Reseta apenas os escolhidos para 'pendente' antes de rodar.
-    setResultados((prev) => {
-      const novo = new Map(prev)
-      for (const link of alvos) novo.set(link.idPlanilha, { estado: 'pendente' })
-      return novo
-    })
-
-    let feitos = 0
-    let i = 0
-
-    const atualizar = (id: string, r: ResultadoLink) => {
-      setResultados((prev) => {
-        const novo = new Map(prev)
-        novo.set(id, r)
-        return novo
-      })
+  async function aoCompararLote() {
+    setErroExtracao(null)
+    setExtraindo(true)
+    setDiffRecente(null)
+    try {
+      const diff = await compararLote(texto, classeLote || undefined)
+      setDiffRecente(diff)
+      setTexto('')
+    } catch (e) {
+      setErroExtracao(e instanceof Error ? e.message : String(e))
+    } finally {
+      setExtraindo(false)
     }
+  }
 
+  async function aoValidarTodos(modo: 'pendentes' | 'validos' | 'todos') {
+    const fonte = linksFiltrados.length > 0 && linksFiltrados.length < ativos.length ? linksFiltrados : ativos
+    const alvos = modo === 'todos'
+      ? fonte.slice()
+      : modo === 'validos'
+        ? fonte.filter((l) => l.estado === 'valido')
+        : fonte.filter((l) => l.estado === 'pendente' || l.estado === 'erro' || l.estado === 'invalido')
+    if (alvos.length === 0) return
+    setValidandoTodos(true)
+    setProgresso({ feitos: 0, total: alvos.length })
+    let i = 0
+    const concorrencia = 3
+    let feitos = 0
     async function worker() {
       while (i < alvos.length) {
         const idx = i++
-        const link = alvos[idx]
-        atualizar(link.idPlanilha, { estado: 'validando' })
-        try {
-          const r = await importacaoApi.validarLink(link.url)
-          atualizar(link.idPlanilha, {
-            estado: r.valido ? 'valido' : 'invalido',
-            resultado: r,
-          })
-        } catch (e) {
-          atualizar(link.idPlanilha, {
-            estado: 'erro',
-            mensagemErro: e instanceof Error ? e.message : String(e),
-          })
-        } finally {
-          feitos++
-          setProgresso({ feitos, total: alvos.length })
-        }
+        try { await validar(alvos[idx].id) } catch { /* segue */ }
+        feitos++
+        setProgresso({ feitos, total: alvos.length })
       }
     }
-
-    // Concorrência limitada — 3 em paralelo (evita estressar o Sheets/API)
-    await Promise.all([worker(), worker(), worker()])
-    setExecutando(false)
+    await Promise.all(Array.from({ length: concorrencia }, () => worker()))
+    setValidandoTodos(false)
   }
-
-  function validarTodos() {
-    void rodarValidacao(links)
-  }
-
-  function retentarFalhas() {
-    const falhas = links.filter((l) => {
-      const r = resultados.get(l.idPlanilha)
-      return r?.estado === 'invalido' || r?.estado === 'erro'
-    })
-    void rodarValidacao(falhas)
-  }
-
-  function retentarUm(link: LinkExtraido) {
-    void rodarValidacao([link])
-  }
-
-  // Agregados globais — erros e divergências de TODAS as planilhas, com o link de origem.
-  const todosErros = useMemo<ErroAgregado[]>(() => {
-    const lista: ErroAgregado[] = []
-    for (const link of links) {
-      const r = resultados.get(link.idPlanilha)
-      if (!r?.resultado) continue
-      for (const e of r.resultado.erros) lista.push({ link, erro: e })
-    }
-    return lista
-  }, [links, resultados])
-
-  const todasDivergencias = useMemo<DivergenciaAgregada[]>(() => {
-    const lista: DivergenciaAgregada[] = []
-    for (const link of links) {
-      const r = resultados.get(link.idPlanilha)
-      if (!r?.resultado?.divergencias) continue
-      for (const d of r.resultado.divergencias) lista.push({ link, divergencia: d })
-    }
-    return lista
-  }, [links, resultados])
 
   const stats = useMemo(() => {
     let validos = 0, invalidos = 0, erros = 0, pendentes = 0, totalMateriais = 0
-    for (const r of resultados.values()) {
-      if (r.estado === 'valido') { validos++; totalMateriais += r.resultado?.totalMateriais ?? 0 }
-      else if (r.estado === 'invalido') invalidos++
-      else if (r.estado === 'erro') erros++
+    for (const l of ativos) {
+      if (l.estado === 'valido') { validos++; totalMateriais += l.totalMateriais ?? 0 }
+      else if (l.estado === 'invalido') invalidos++
+      else if (l.estado === 'erro') erros++
       else pendentes++
     }
     return { validos, invalidos, erros, pendentes, totalMateriais }
-  }, [resultados])
+  }, [ativos])
+
+  const todosErros = useMemo<{ link: LinkValidacao; item: ItemValidacao }[]>(() => {
+    const lista: { link: LinkValidacao; item: ItemValidacao }[] = []
+    for (const link of ativos) for (const e of link.erros) lista.push({ link, item: e })
+    return lista
+  }, [ativos])
+
+  const todasDivergencias = useMemo<{ link: LinkValidacao; item: ItemValidacao }[]>(() => {
+    const lista: { link: LinkValidacao; item: ItemValidacao }[] = []
+    for (const link of ativos) for (const d of link.divergencias) lista.push({ link, item: d })
+    return lista
+  }, [ativos])
+
+  const linksBase = aba === 'ativos' ? ativos : lixeira
+
+  const linksFiltrados = useMemo(() => {
+    const busca = filtroBusca.trim().toLowerCase()
+    // detecta "INSUMOS 3", "saneantes grupo 5", "med 2", "grupo 7", "3"
+    const tokens = busca.split(/\s+/).filter(Boolean)
+    const numeroBusca = tokens.map((t) => parseInt(t, 10)).find((n) => !isNaN(n))
+    const textoBusca = tokens.filter((t) => isNaN(parseInt(t, 10)) && t !== 'grupo').join(' ')
+
+    return linksBase.filter((l) => {
+      if (filtroClasse !== 'todas') {
+        if ((l.classe ?? '').toUpperCase() !== filtroClasse) return false
+      }
+      if (filtroSoErros) {
+        const temErro = l.erros.length > 0 || l.divergencias.length > 0
+          || l.estado === 'erro' || l.estado === 'invalido'
+        if (!temErro) return false
+      }
+      if (busca) {
+        const classeOk = textoBusca ? (l.classe ?? '').toLowerCase().includes(textoBusca) : true
+        const numeroOk = numeroBusca != null ? l.numeroGrupo === numeroBusca : true
+        const rotuloOk = (l.rotulo ?? '').toLowerCase().includes(busca)
+        const urlOk = l.url.toLowerCase().includes(busca)
+        // se digitou texto + número, exige os dois baterem; senão, casa por qualquer campo
+        if (textoBusca && numeroBusca != null) {
+          if (!(classeOk && numeroOk)) {
+            // fallback: bate rótulo inteiro
+            if (!rotuloOk) return false
+          }
+        } else if (!(classeOk && numeroOk) && !rotuloOk && !urlOk) {
+          return false
+        }
+      }
+      return true
+    })
+  }, [linksBase, filtroClasse, filtroBusca, filtroSoErros])
+
+  const linksMostrados = linksFiltrados
 
   return (
     <div className="anim-rise space-y-6">
       <PageHeader
         titulo="Validar em lote"
-        descricao="Cole vários links de planilhas Google Sheets e valide todos de uma vez. Não importa nada — só verifica se cada planilha está correta antes de você iniciar as importações."
+        descricao="Lista persistente de planilhas em revisão. Adicione, valide, marque itens como conferidos. Em tempo real entre os operadores."
       />
 
-      <Card>
-        <CardHeader>
-          <div>
-            <CardTitle><ListChecks />1. Cole o texto com os links</CardTitle>
-            <CardDescription>
-              Aceita texto livre — qualquer URL no formato <code className="font-mono text-[11px]">docs.google.com/spreadsheets/d/...</code> é extraída.
-              O rótulo é o que aparece antes da URL na mesma linha (ex.: "Grupo 01").
-            </CardDescription>
-          </div>
-        </CardHeader>
-
-        <div className="p-[18px] space-y-3">
-          <Textarea
-            placeholder={`MEDICAMENTOS\nGrupo 01: https://docs.google.com/spreadsheets/d/...\nGrupo 02: https://docs.google.com/spreadsheets/d/...\n\nSANEANTES\nGrupo 01 - https://docs.google.com/spreadsheets/d/...`}
-            value={texto}
-            onChange={(e) => setTexto(e.target.value)}
-            className="font-mono text-[12px] min-h-[180px]"
-          />
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={extrair} disabled={!texto.trim()}>
-              <Search /> Extrair links
-            </Button>
-            <Button variant="ghost" onClick={limpar} disabled={!texto && links.length === 0}>
-              <Eraser /> Limpar
-            </Button>
-          </div>
-        </div>
-      </Card>
-
-      {links.length > 0 && (
+      {/* Adicionar links — colagem em lote (com diff) OU unitário */}
+      {aba === 'ativos' && (
         <Card>
           <CardHeader>
             <div className="min-w-0 flex-1">
-              <CardTitle><CheckCircle2 />2. Validar {links.length} {links.length === 1 ? 'link' : 'links'}</CardTitle>
+              <CardTitle><ListChecks />Atualizar a lista</CardTitle>
               <CardDescription>
-                {stats.validos > 0 && <>{stats.validos} válidos · </>}
-                {stats.invalidos > 0 && <>{stats.invalidos} com erros · </>}
-                {stats.erros > 0 && <>{stats.erros} falharam · </>}
-                {stats.pendentes > 0 && <>{stats.pendentes} pendentes</>}
-                {stats.totalMateriais > 0 && <> · {stats.totalMateriais.toLocaleString('pt-BR')} materiais somados</>}
+                Cole um texto com múltiplos links — vamos comparar com a lista atual: adiciona os novos, indica os duplicados e mostra o que está faltando no texto colado.
               </CardDescription>
             </div>
-            <div className="flex gap-2 flex-wrap justify-end">
-              {todosErros.length > 0 && !executando && (
-                <Button variant="outline" onClick={() => setModalGlobal('erros')}>
-                  <XCircle className="text-[hsl(var(--error-500))]" /> Ver todos os erros ({todosErros.length})
-                </Button>
-              )}
-              {todasDivergencias.length > 0 && !executando && (
-                <Button variant="outline" onClick={() => setModalGlobal('divergencias')}>
-                  <Scale className="text-[hsl(20_85%_45%)]" /> Ver divergências ({todasDivergencias.length})
-                </Button>
-              )}
-              {(stats.invalidos > 0 || stats.erros > 0) && !executando && (
-                <Button variant="secondary" onClick={retentarFalhas}>
-                  <RotateCw /> Tentar de novo {stats.invalidos + stats.erros}
-                </Button>
-              )}
-              <Button onClick={validarTodos} disabled={executando}>
-                {executando ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
-                {executando ? `Validando ${progresso.feitos}/${progresso.total}…` : 'Validar todos'}
+            <Button variant="outline" onClick={() => setUnitarioAberto(true)}>
+              <ListChecks /> Adicionar 1 link
+            </Button>
+          </CardHeader>
+          <div className="p-[18px] space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <label className="text-[12px] font-medium text-[hsl(var(--neutral-700))]">Classe deste lote:</label>
+              <select
+                value={classeLote}
+                onChange={(e) => setClasseLote(e.target.value)}
+                disabled={extraindo}
+                className="h-9 px-2 text-[13px] border border-input rounded-md bg-surface"
+              >
+                {CLASSES_PADRAO.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <span className="text-[11px] text-muted-foreground">
+                A numeração do grupo é detectada do texto ("Grupo X") e validada contra os já cadastrados desta classe.
+              </span>
+            </div>
+            <Textarea
+              placeholder={`Grupo 01: https://docs.google.com/spreadsheets/d/...\nGrupo 02: https://docs.google.com/spreadsheets/d/...`}
+              value={texto}
+              onChange={(e) => setTexto(e.target.value)}
+              className="font-mono text-[12px] min-h-[140px]"
+              disabled={extraindo}
+            />
+            {erroExtracao && (
+              <Alert variant="destructive">
+                <AlertTriangle />
+                <AlertDescription>{erroExtracao}</AlertDescription>
+              </Alert>
+            )}
+            <div className="flex gap-2">
+              <Button onClick={() => void aoCompararLote()} disabled={extraindo || !texto.trim()}>
+                {extraindo ? <Loader2 className="animate-spin" /> : <Search />}
+                {extraindo ? 'Comparando…' : 'Comparar lote com a lista'}
+              </Button>
+              <Button variant="ghost" onClick={() => { setTexto(''); setDiffRecente(null) }} disabled={extraindo || (!texto && !diffRecente)}>
+                <Eraser /> Limpar
               </Button>
             </div>
-          </CardHeader>
-
-          {executando && (
-            <div className="px-[18px] pb-3">
-              <div className="h-1 rounded-full bg-[hsl(var(--neutral-100))] overflow-hidden">
-                <div
-                  className="h-full bg-[hsl(var(--brand-500))] transition-all"
-                  style={{ width: `${(progresso.feitos / Math.max(1, progresso.total)) * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
-              <thead>
-                <tr className="text-left">
-                  <Th className="w-[100px]">Status</Th>
-                  <Th className="w-[180px]">Rótulo</Th>
-                  <Th>Link</Th>
-                  <Th className="w-[90px] text-right">Materiais</Th>
-                  <Th className="w-[100px] text-right">Divergências</Th>
-                  <Th className="w-[80px] text-right">Avisos</Th>
-                  <Th className="w-[110px] text-right">Ações</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {links.map((l) => {
-                  const r = resultados.get(l.idPlanilha) ?? { estado: 'pendente' as Estado }
-                  return (
-                    <tr key={l.idPlanilha} className="border-b border-[hsl(var(--neutral-100))] last:border-b-0">
-                      <Td><StatusBadge estado={r.estado} /></Td>
-                      <Td className="font-medium">{l.rotulo}</Td>
-                      <Td>
-                        <a
-                          href={l.urlOriginal}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[12px] text-muted-foreground hover:text-[hsl(var(--brand-600))] inline-flex items-center gap-1 truncate max-w-[460px]"
-                          title={l.urlOriginal}
-                        >
-                          <ExternalLink className="size-3 shrink-0 opacity-60" />
-                          <span className="truncate">{l.urlOriginal}</span>
-                        </a>
-                      </Td>
-                      <Td className="text-right font-mono tabular-nums">
-                        {r.resultado ? r.resultado.totalMateriais.toLocaleString('pt-BR') : '—'}
-                      </Td>
-                      <Td className="text-right font-mono tabular-nums">
-                        {r.resultado ? (
-                          (r.resultado.divergencias?.length ?? 0) > 0 ? (
-                            <span className="font-semibold text-[hsl(20_85%_35%)]">{r.resultado.divergencias!.length}</span>
-                          ) : '0'
-                        ) : '—'}
-                      </Td>
-                      <Td className="text-right font-mono tabular-nums">
-                        {r.resultado ? r.resultado.avisos.length : '—'}
-                      </Td>
-                      <Td className="text-right">
-                        <div className="inline-flex items-center gap-1 justify-end">
-                          {(r.estado === 'invalido' || r.estado === 'erro') && !executando && (
-                            <Button variant="ghost" size="xs" onClick={() => retentarUm(l)} title="Tentar de novo">
-                              <RotateCw />
-                            </Button>
-                          )}
-                          {(r.estado === 'invalido' || r.estado === 'erro'
-                            || (r.estado === 'valido' && (
-                              (r.resultado?.avisos.length ?? 0) > 0
-                              || (r.resultado?.divergencias?.length ?? 0) > 0
-                            ))) && (
-                            <Button variant="ghost" size="xs" onClick={() => setDetalhes({ link: l, r })}>
-                              Detalhes
-                            </Button>
-                          )}
-                        </div>
-                      </Td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
           </div>
         </Card>
       )}
 
-      {links.length === 0 && texto.trim() && (
+      {/* Resumo do último diff */}
+      {diffRecente && (
+        <ResumoDiff diff={diffRecente} onFechar={() => setDiffRecente(null)} />
+      )}
+
+      <DialogAdicionarUnitario
+        aberto={unitarioAberto}
+        onFechar={() => setUnitarioAberto(false)}
+        onAdicionar={async (url, opts) => {
+          await adicionarLink(url, opts)
+        }}
+      />
+
+      {/* Banner de gaps de numeração por classe */}
+      {aba === 'ativos' && gaps.length > 0 && gaps.some((g) => g.faltantes.length > 0) && (
         <Alert variant="warning">
           <AlertTriangle />
           <AlertDescription>
-            Nenhum link no formato Google Sheets encontrado no texto colado. Confira se as URLs estão em <code className="font-mono text-[11px]">docs.google.com/spreadsheets/d/...</code>.
+            <div className="space-y-1">
+              <div className="font-semibold">Gaps na numeração de grupo:</div>
+              {gaps.filter((g) => g.faltantes.length > 0).map((g) => (
+                <div key={g.classe} className="text-[12px]">
+                  <strong>{g.classe}</strong>: faltam {g.faltantes.map((n) => `Grupo ${n}`).join(', ')}
+                  {g.ultimoNumero != null && <> (último cadastrado: Grupo {g.ultimoNumero})</>}
+                </div>
+              ))}
+            </div>
           </AlertDescription>
         </Alert>
       )}
 
+      {/* Abas + Toolbar */}
+      <Card>
+        <CardHeader>
+          <div className="min-w-0 flex-1">
+            <CardTitle>
+              <CheckCircle2 />
+              {aba === 'ativos' ? <>Ativos · {ativos.length}</> : <>Lixeira · {lixeira.length}</>}
+            </CardTitle>
+            <CardDescription>
+              {aba === 'ativos' ? (
+                <>
+                  {stats.validos > 0 && <>{stats.validos} válidos · </>}
+                  {stats.invalidos > 0 && <>{stats.invalidos} com erros · </>}
+                  {stats.erros > 0 && <>{stats.erros} falharam · </>}
+                  {stats.pendentes > 0 && <>{stats.pendentes} pendentes</>}
+                  {stats.totalMateriais > 0 && <> · {stats.totalMateriais.toLocaleString('pt-BR')} materiais somados</>}
+                </>
+              ) : <>Links excluídos. {ehAdmin ? 'Você é admin: pode restaurar ou apagar definitivo.' : 'Só admin pode restaurar ou apagar.'}</>}
+            </CardDescription>
+          </div>
+          <div className="flex gap-2 flex-wrap justify-end items-center">
+            <div className="inline-flex bg-[hsl(var(--neutral-50))] border border-border rounded-md p-0.5 text-[12px]">
+              <button
+                onClick={() => setAba('ativos')}
+                className={cn('px-3 py-1 rounded-sm', aba === 'ativos' ? 'bg-surface shadow-sm' : 'text-muted-foreground')}
+              >
+                Ativos ({ativos.length})
+              </button>
+              <button
+                onClick={() => setAba('lixeira')}
+                className={cn('px-3 py-1 rounded-sm', aba === 'lixeira' ? 'bg-surface shadow-sm' : 'text-muted-foreground')}
+              >
+                Lixeira ({lixeira.length})
+              </button>
+            </div>
+            {aba === 'ativos' && (
+              <>
+                {todosErros.length > 0 && !validandoTodos && (
+                  <Button variant="outline" onClick={() => setModalGlobal('erros')}>
+                    <XCircle className="text-[hsl(var(--error-500))]" /> Erros ({todosErros.length})
+                  </Button>
+                )}
+                {todasDivergencias.length > 0 && !validandoTodos && (
+                  <Button variant="outline" onClick={() => setModalGlobal('divergencias')}>
+                    <Scale className="text-[hsl(20_85%_45%)]" /> Divergências ({todasDivergencias.length})
+                  </Button>
+                )}
+                {ativos.length > 0 && (
+                  <>
+                    <select
+                      value={modoValidar}
+                      onChange={(e) => setModoValidar(e.target.value as 'pendentes' | 'validos' | 'todos')}
+                      disabled={validandoTodos}
+                      className="h-9 px-2 text-[13px] border border-input rounded-md bg-surface"
+                    >
+                      <option value="pendentes">Só pendentes/erros</option>
+                      <option value="validos">Só os já validados</option>
+                      <option value="todos">Re-validar todos</option>
+                    </select>
+                    <Button onClick={() => void aoValidarTodos(modoValidar)} disabled={validandoTodos}>
+                      {validandoTodos ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
+                      {validandoTodos
+                        ? `Validando ${progresso.feitos}/${progresso.total}…`
+                        : modoValidar === 'todos' ? 'Re-validar todos'
+                          : modoValidar === 'validos' ? 'Re-validar válidos'
+                          : 'Validar pendentes'}
+                    </Button>
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        </CardHeader>
+
+        {erro && (
+          <div className="px-[18px] pb-3">
+            <Alert variant="destructive">
+              <AlertTriangle />
+              <AlertDescription>{erro}</AlertDescription>
+            </Alert>
+          </div>
+        )}
+
+        {validandoTodos && (
+          <div className="px-[18px] pb-3">
+            <div className="h-1 rounded-full bg-[hsl(var(--neutral-100))] overflow-hidden">
+              <div className="h-full bg-[hsl(var(--brand-500))] transition-all"
+                style={{ width: `${(progresso.feitos / Math.max(1, progresso.total)) * 100}%` }} />
+            </div>
+          </div>
+        )}
+
+        {/* Filtros */}
+        {linksBase.length > 0 && (
+          <div className="px-[18px] pb-3 flex flex-wrap gap-2 items-center">
+            <select
+              value={filtroClasse}
+              onChange={(e) => setFiltroClasse(e.target.value)}
+              className="h-9 px-2 text-[13px] border border-input rounded-md bg-surface"
+            >
+              <option value="todas">Todas as classes</option>
+              {CLASSES_PADRAO.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <div className="relative flex-1 min-w-[200px] max-w-[360px]">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+              <Input
+                placeholder='Buscar por classe + número (ex: "INSUMOS 3", "Grupo 5")'
+                value={filtroBusca}
+                onChange={(e) => setFiltroBusca(e.target.value)}
+                className="pl-8"
+              />
+            </div>
+            <label className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground select-none">
+              <input
+                type="checkbox"
+                checked={filtroSoErros}
+                onChange={(e) => setFiltroSoErros(e.target.checked)}
+              />
+              Só com erros / divergências
+            </label>
+            {(filtroClasse !== 'todas' || filtroBusca || filtroSoErros) && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { setFiltroClasse('todas'); setFiltroBusca(''); setFiltroSoErros(false) }}
+              >
+                <Eraser /> Limpar filtros
+              </Button>
+            )}
+            <span className="text-[11.5px] text-muted-foreground ml-auto">
+              Mostrando <strong className="text-foreground">{linksFiltrados.length}</strong> de {linksBase.length}
+            </span>
+          </div>
+        )}
+
+        {carregando ? (
+          <div className="p-12 text-center text-muted-foreground text-[13px]">
+            <Loader2 className="size-5 animate-spin mx-auto mb-2" />
+            Carregando lista…
+          </div>
+        ) : linksMostrados.length === 0 ? (
+          <div className="p-12 text-center text-muted-foreground text-[13px]">
+            {linksBase.length === 0
+              ? (aba === 'ativos' ? 'Nenhum link na lista. Cole URLs acima.' : 'Lixeira vazia.')
+              : 'Nenhum link bate com os filtros atuais.'}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12.5px]">
+              <thead>
+                <tr className="text-left">
+                  <Th className="w-[90px]">Status</Th>
+                  <Th className="w-[150px]">Rótulo</Th>
+                  <Th className="w-[260px]">Link</Th>
+                  <Th className="w-[80px] text-right">Materiais</Th>
+                  <Th className="w-[90px] text-right">Diverg.</Th>
+                  <Th className="w-[60px] text-right">Erros</Th>
+                  <Th className="w-[260px] text-right">Ações</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {agruparPorClasse(linksMostrados).map(([classe, links]) => (
+                  <FragmentoClasse
+                    key={classe ?? '__sem__'}
+                    classe={classe}
+                    links={links}
+                    aba={aba}
+                    ehAdmin={ehAdmin}
+                    sessaoCompras={sessaoCompras}
+                    onDetalhes={setDetalhes}
+                    gaps={gaps}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
       <DialogDetalhes
-        item={detalhes}
+        link={detalhes}
         onFechar={() => setDetalhes(null)}
+        meuLogin={meuLogin}
+        alternarRevisao={alternarRevisao}
       />
 
       <ModalErrosGlobal
         aberto={modalGlobal === 'erros'}
-        erros={todosErros}
+        itens={todosErros}
+        meuLogin={meuLogin}
+        alternarRevisao={alternarRevisao}
         onFechar={() => setModalGlobal(null)}
       />
 
       <ModalDivergenciasGlobal
         aberto={modalGlobal === 'divergencias'}
-        divergencias={todasDivergencias}
+        itens={todasDivergencias}
+        meuLogin={meuLogin}
+        alternarRevisao={alternarRevisao}
         onFechar={() => setModalGlobal(null)}
       />
+
+      <DialogConfirmarImportar />
     </div>
   )
 }
 
-function Th({ children, className }: { children: React.ReactNode; className?: string }) {
+// ============================================================================
+//  Agrupamento por classe
+// ============================================================================
+
+function agruparPorClasse(links: LinkValidacao[]): Array<[string | null, LinkValidacao[]]> {
+  const mapa = new Map<string | null, LinkValidacao[]>()
+  for (const l of links) {
+    const k = l.classe ? l.classe.toUpperCase() : null
+    if (!mapa.has(k)) mapa.set(k, [])
+    mapa.get(k)!.push(l)
+  }
+  // ordem definida: CLASSES_PADRAO primeiro, depois outras alfabéticas, sem-classe por último
+  const todas = Array.from(mapa.keys())
+  todas.sort((a, b) => {
+    if (a === null) return 1
+    if (b === null) return -1
+    const ia = (CLASSES_PADRAO as readonly string[]).indexOf(a)
+    const ib = (CLASSES_PADRAO as readonly string[]).indexOf(b)
+    if (ia !== -1 || ib !== -1) {
+      if (ia === -1) return 1
+      if (ib === -1) return -1
+      return ia - ib
+    }
+    return a.localeCompare(b, 'pt-BR')
+  })
+  return todas.map((k) => [k, mapa.get(k)!.slice().sort((a, b) => {
+    const na = a.numeroGrupo ?? Number.MAX_SAFE_INTEGER
+    const nb = b.numeroGrupo ?? Number.MAX_SAFE_INTEGER
+    if (na !== nb) return na - nb
+    return a.id - b.id
+  })])
+}
+
+function FragmentoClasse({
+  classe, links, aba, ehAdmin, sessaoCompras, onDetalhes, gaps,
+}: {
+  classe: string | null
+  links: LinkValidacao[]
+  aba: 'ativos' | 'lixeira'
+  ehAdmin: boolean
+  sessaoCompras: boolean
+  onDetalhes: (l: LinkValidacao) => void
+  gaps: GapClasse[]
+}) {
+  const gap = classe ? gaps.find((g) => g.classe.toUpperCase() === classe) : null
   return (
-    <th
-      className={cn(
-        'px-3.5 py-2.5 text-[11px] uppercase tracking-[0.05em] font-semibold text-muted-foreground bg-[hsl(var(--neutral-25))] border-b border-border',
-        className,
-      )}
-    >
-      {children}
-    </th>
+    <>
+      <tr>
+        <td colSpan={7} className="bg-[hsl(var(--neutral-50))] border-y border-border px-3.5 py-1.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] uppercase tracking-[0.06em] font-semibold text-[hsl(var(--neutral-700))]">
+              {classe ?? 'Sem classe'}
+            </span>
+            <Badge variant="muted">{links.length}</Badge>
+            {gap && gap.faltantes.length > 0 && (
+              <span className="text-[11px] text-[hsl(var(--warning-700))]">
+                · faltam {gap.faltantes.map((n) => `Grupo ${n}`).join(', ')}
+              </span>
+            )}
+          </div>
+        </td>
+      </tr>
+      {links.map((l) => (
+        <LinhaLink
+          key={l.id}
+          link={l}
+          aba={aba}
+          ehAdmin={ehAdmin}
+          sessaoCompras={sessaoCompras}
+          onDetalhes={() => onDetalhes(l)}
+        />
+      ))}
+    </>
   )
 }
 
-function Td({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <td className={cn('px-3.5 py-3 align-middle', className)}>{children}</td>
+// ============================================================================
+//  Linha da tabela
+// ============================================================================
+
+function LinhaLink({
+  link, aba, ehAdmin, sessaoCompras, onDetalhes,
+}: {
+  link: LinkValidacao
+  aba: 'ativos' | 'lixeira'
+  ehAdmin: boolean
+  sessaoCompras: boolean
+  onDetalhes: () => void
+}) {
+  const { validar, excluir, restaurar, apagarDefinitivamente, importar } = useListaValidacao()
+  const [agindo, setAgindo] = useState<string | null>(null)
+  const [erroAcao, setErroAcao] = useState<string | null>(null)
+
+  async function correr<T>(rotulo: string, fn: () => Promise<T>) {
+    setAgindo(rotulo)
+    setErroAcao(null)
+    try { await fn() } catch (e) { setErroAcao(e instanceof Error ? e.message : String(e)) }
+    finally { setAgindo(null) }
+  }
+
+  const podeImportar = link.estado === 'valido' && sessaoCompras
+  const totalRevisaveis = link.erros.length + link.divergencias.length
+  const totalRevisados = link.erros.filter((i) => i.revisores.length > 0).length
+    + link.divergencias.filter((i) => i.revisores.length > 0).length
+  const todoRevisado = totalRevisaveis > 0 && totalRevisados === totalRevisaveis
+
+  return (
+    <tr className="border-b border-[hsl(var(--neutral-100))] last:border-b-0">
+      <Td><StatusBadge estado={link.estado} /></Td>
+      <Td>
+        <div className="font-medium truncate max-w-[140px]" title={link.rotulo ?? undefined}>
+          {link.rotulo ?? <span className="text-muted-foreground">—</span>}
+        </div>
+        {link.criadoPorLogin && (
+          <div className="font-mono text-[10px] text-muted-foreground">por {link.criadoPorLogin}</div>
+        )}
+      </Td>
+      <Td>
+        <a
+          href={link.url}
+          target="_blank"
+          rel="noreferrer"
+          className="text-[11.5px] text-muted-foreground hover:text-[hsl(var(--brand-600))] inline-flex items-center gap-1 max-w-[260px]"
+          title={link.url}
+        >
+          <ExternalLink className="size-3 shrink-0 opacity-60" />
+          <span className="truncate">{link.url}</span>
+        </a>
+        {erroAcao && (
+          <div className="text-[11px] text-[hsl(var(--error-700))] mt-0.5">{erroAcao}</div>
+        )}
+      </Td>
+      <Td className="text-right font-mono tabular-nums">
+        {link.totalMateriais != null ? link.totalMateriais.toLocaleString('pt-BR') : '—'}
+      </Td>
+      <Td className="text-right font-mono tabular-nums">
+        {link.divergencias.length > 0
+          ? <span className="font-semibold text-[hsl(20_85%_35%)]">{link.divergencias.length}</span>
+          : '0'}
+      </Td>
+      <Td className="text-right font-mono tabular-nums">
+        {link.erros.length > 0 ? <span className="text-[hsl(var(--error-600))] font-semibold">{link.erros.length}</span> : '0'}
+      </Td>
+      <Td className="text-right">
+        <div className="inline-flex items-center gap-1 justify-end flex-wrap">
+          {todoRevisado && (
+            <Badge variant="success" className="mr-1">{totalRevisados} revisados</Badge>
+          )}
+          {aba === 'ativos' ? (
+            <>
+              <Button variant="ghost" size="xs" onClick={() => void correr('validar', () => validar(link.id))} disabled={agindo !== null} title="Re-validar">
+                {agindo === 'validar' ? <Loader2 className="animate-spin" /> : <RotateCw />}
+              </Button>
+              <Button variant="ghost" size="xs" onClick={onDetalhes} disabled={totalRevisaveis === 0 && link.estado !== 'erro'}>
+                Detalhes
+              </Button>
+              <Button
+                variant={podeImportar ? 'primary' : 'ghost'}
+                size="xs"
+                onClick={() => void correr('importar', async () => {
+                  const { id } = await importar(link.id)
+                  window.location.href = `/importar?execucao=${id}`
+                })}
+                disabled={!podeImportar || agindo !== null}
+                title={!sessaoCompras ? 'Conecte a sessão Compras para importar' : link.estado !== 'valido' ? 'Valide com sucesso antes de importar' : 'Importar agora'}
+              >
+                {agindo === 'importar' ? <Loader2 className="animate-spin" /> : <Play />}
+                Importar
+              </Button>
+              <Button variant="ghost" size="xs" onClick={() => void correr('excluir', () => excluir(link.id))} disabled={agindo !== null} title="Excluir (vai pra lixeira)">
+                {agindo === 'excluir' ? <Loader2 className="animate-spin" /> : <Trash2 className="text-[hsl(var(--error-500))]" />}
+              </Button>
+            </>
+          ) : (
+            <>
+              {ehAdmin ? (
+                <>
+                  <Button variant="ghost" size="xs" onClick={() => void correr('restaurar', () => restaurar(link.id))} disabled={agindo !== null}>
+                    {agindo === 'restaurar' ? <Loader2 className="animate-spin" /> : <Upload className="rotate-180" />} Restaurar
+                  </Button>
+                  <Button variant="ghost" size="xs" onClick={() => void correr('apagar', () => apagarDefinitivamente(link.id))} disabled={agindo !== null}>
+                    {agindo === 'apagar' ? <Loader2 className="animate-spin" /> : <Eraser className="text-[hsl(var(--error-500))]" />} Apagar
+                  </Button>
+                </>
+              ) : (
+                <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1">
+                  <Shield className="size-3" /> só admin
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      </Td>
+    </tr>
+  )
 }
 
-function StatusBadge({ estado }: { estado: Estado }) {
-  if (estado === 'pendente') return <Badge variant="muted">pendente</Badge>
-  if (estado === 'validando') return (
-    <span className="inline-flex items-center gap-1.5 text-[11px] text-[hsl(var(--brand-700))] font-semibold uppercase tracking-[0.04em]">
-      <Loader2 className="size-3 animate-spin" /> validando
-    </span>
-  )
-  if (estado === 'valido') return <Badge variant="success" comDot>válido</Badge>
-  if (estado === 'invalido') return <Badge variant="destructive" comDot>com erros</Badge>
-  return <Badge variant="destructive" comDot>falhou</Badge>
-}
+// ============================================================================
+//  Detalhes (por planilha)
+// ============================================================================
 
 function DialogDetalhes({
-  item, onFechar,
+  link, onFechar, meuLogin, alternarRevisao,
 }: {
-  item: { link: LinkExtraido; r: ResultadoLink } | null
+  link: LinkValidacao | null
   onFechar: () => void
+  meuLogin: string | undefined
+  alternarRevisao: (itemId: number, jaRevisado: boolean) => Promise<void>
 }) {
+  if (!link) {
+    return (
+      <Dialog open={false} onOpenChange={onFechar}>
+        <DialogContent />
+      </Dialog>
+    )
+  }
+
   return (
-    <Dialog open={item !== null} onOpenChange={(open) => !open && onFechar()}>
-      <DialogContent className="sm:max-w-[680px] max-h-[85vh] flex flex-col gap-3">
+    <Dialog open={true} onOpenChange={(open) => { if (!open) onFechar() }}>
+      <DialogContent className="sm:max-w-[860px] max-h-[88vh] flex flex-col gap-3">
         <DialogHeader>
-          <div className={cn(
-            'flex size-10 items-center justify-center rounded-[10px] mb-1',
-            item?.r.estado === 'valido'
-              ? 'bg-[hsl(var(--warning-50))] text-[hsl(var(--warning-500))]'
-              : 'bg-[hsl(var(--error-50))] text-[hsl(var(--error-500))]',
-          )}>
-            {item?.r.estado === 'valido' ? <AlertTriangle className="size-5" /> : <XCircle className="size-5" />}
-          </div>
-          <DialogTitle>{item?.link.rotulo}</DialogTitle>
+          <DialogTitle className="text-[18px]">{link.rotulo ?? 'Sem rótulo'}</DialogTitle>
           <DialogDescription>
-            {item?.r.estado === 'valido' && 'Planilha válida — apenas avisos abaixo.'}
-            {item?.r.estado === 'invalido' && 'Planilha tem erros que bloqueiam a importação.'}
-            {item?.r.estado === 'erro' && 'Falha ao buscar a planilha. Veja a mensagem abaixo.'}
+            <a href={link.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-[hsl(var(--brand-600))]">
+              <ExternalLink className="size-3" />
+              <span className="truncate">{link.url}</span>
+            </a>
           </DialogDescription>
         </DialogHeader>
 
-        {item && (
-          <div className="space-y-3 overflow-y-auto flex-1 min-h-0 -mx-6 px-6">
-            <a
-              href={item.link.urlOriginal}
-              target="_blank"
-              rel="noreferrer"
-              className="text-[12px] text-[hsl(var(--brand-700))] hover:underline inline-flex items-center gap-1 break-all"
-            >
-              <ExternalLink className="size-3 shrink-0" />
-              <span className="truncate">{item.link.urlOriginal}</span>
-            </a>
-
-            {item.r.estado === 'erro' && item.r.mensagemErro && (
-              <pre className="font-mono text-[12px] leading-relaxed bg-[hsl(var(--neutral-50))] border border-border rounded-md p-3 whitespace-pre-wrap break-words text-[hsl(var(--error-700))]">
-{item.r.mensagemErro}
-              </pre>
-            )}
-
-            {item.r.resultado && item.r.resultado.erros.length > 0 && (
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.06em] font-semibold text-muted-foreground mb-1.5">
-                  {item.r.resultado.erros.length} {item.r.resultado.erros.length === 1 ? 'erro' : 'erros'}
-                </div>
-                <div className="border border-[hsl(var(--error-100))] rounded-md overflow-hidden">
-                  <table className="w-full text-[12.5px]">
-                    <thead>
-                      <tr className="bg-[hsl(var(--error-50))]">
-                        <th className="px-2.5 py-1.5 text-left text-[10px] uppercase font-semibold text-[hsl(var(--error-700))]">Local</th>
-                        <th className="px-2.5 py-1.5 text-left text-[10px] uppercase font-semibold text-[hsl(var(--error-700))]">Linha</th>
-                        <th className="px-2.5 py-1.5 text-left text-[10px] uppercase font-semibold text-[hsl(var(--error-700))]">Campo</th>
-                        <th className="px-2.5 py-1.5 text-left text-[10px] uppercase font-semibold text-[hsl(var(--error-700))]">Mensagem</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {item.r.resultado.erros.map((e, idx) => (
-                        <tr key={idx} className="border-t border-[hsl(var(--error-100))]">
-                          <td className="px-2.5 py-1.5"><Badge variant="outline">{e.local}</Badge></td>
-                          <td className="px-2.5 py-1.5 font-mono text-[11px] tabular-nums">{e.linha ?? '—'}</td>
-                          <td className="px-2.5 py-1.5 font-mono text-[11px]">{e.campo}</td>
-                          <td className="px-2.5 py-1.5">{e.mensagem}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {item.r.resultado && (item.r.resultado.divergencias?.length ?? 0) > 0 && (
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.06em] font-semibold text-[hsl(20_85%_35%)] mb-1.5">
-                  {item.r.resultado.divergencias!.length} {item.r.resultado.divergencias!.length === 1 ? 'divergência' : 'divergências'} c/ histórico
-                </div>
-                <div className="border border-[hsl(20_85%_55%/0.3)] rounded-md overflow-hidden">
-                  <table className="w-full text-[12.5px]">
-                    <thead>
-                      <tr className="bg-[hsl(20_85%_55%/0.08)]">
-                        <th className="px-2.5 py-1.5 text-left text-[10px] uppercase font-semibold text-[hsl(20_85%_30%)]">Linha</th>
-                        <th className="px-2.5 py-1.5 text-left text-[10px] uppercase font-semibold text-[hsl(20_85%_30%)]">Código</th>
-                        <th className="px-2.5 py-1.5 text-left text-[10px] uppercase font-semibold text-[hsl(20_85%_30%)]">Campo</th>
-                        <th className="px-2.5 py-1.5 text-right text-[10px] uppercase font-semibold text-[hsl(20_85%_30%)]">Planilha</th>
-                        <th className="px-2.5 py-1.5 text-right text-[10px] uppercase font-semibold text-[hsl(20_85%_30%)]">Histórico</th>
-                        <th className="px-2.5 py-1.5 text-right text-[10px] uppercase font-semibold text-[hsl(20_85%_30%)]">Δ</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {item.r.resultado.divergencias!.map((d, idx) => (
-                        <tr key={idx} className="border-t border-[hsl(20_85%_55%/0.2)]">
-                          <td className="px-2.5 py-1.5 font-mono text-[11px] tabular-nums">{d.linha ?? '—'}</td>
-                          <td className="px-2.5 py-1.5 font-mono text-[11px]"><LinkCodigoBr codigo={d.codigo} /></td>
-                          <td className="px-2.5 py-1.5 text-[10px] uppercase font-semibold text-[hsl(20_85%_35%)]">{d.tipo === 'preco' ? 'preço' : 'qtd'}</td>
-                          <td className="px-2.5 py-1.5 font-mono text-[11px] tabular-nums text-right">
-                            {d.tipo === 'preco'
-                              ? d.valorPlanilha.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-                              : d.valorPlanilha.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}
-                          </td>
-                          <td className="px-2.5 py-1.5 font-mono text-[11px] tabular-nums text-right text-muted-foreground">
-                            {d.tipo === 'preco'
-                              ? d.valorReferencia.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-                              : d.valorReferencia.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}
-                          </td>
-                          <td className="px-2.5 py-1.5 font-mono text-[11px] tabular-nums text-right">
-                            <span className={d.valorPlanilha > d.valorReferencia ? 'text-[hsl(20_85%_35%)] font-semibold' : 'text-[hsl(20_45%_35%)]'}>
-                              {d.valorPlanilha > d.valorReferencia ? '+' : '−'}{(d.diferencaPct * 100).toFixed(0)}%
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {item.r.resultado && item.r.resultado.avisos.length > 0 && (
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.06em] font-semibold text-muted-foreground mb-1.5">
-                  {item.r.resultado.avisos.length} {item.r.resultado.avisos.length === 1 ? 'aviso' : 'avisos'}
-                </div>
-                <div className="border border-[hsl(var(--warning-100))] rounded-md overflow-hidden">
-                  <table className="w-full text-[12.5px]">
-                    <thead>
-                      <tr className="bg-[hsl(var(--warning-50))]">
-                        <th className="px-2.5 py-1.5 text-left text-[10px] uppercase font-semibold text-[hsl(var(--warning-700))]">Local</th>
-                        <th className="px-2.5 py-1.5 text-left text-[10px] uppercase font-semibold text-[hsl(var(--warning-700))]">Linha</th>
-                        <th className="px-2.5 py-1.5 text-left text-[10px] uppercase font-semibold text-[hsl(var(--warning-700))]">Mensagem</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {item.r.resultado.avisos.map((a, idx) => (
-                        <tr key={idx} className="border-t border-[hsl(var(--warning-100))]">
-                          <td className="px-2.5 py-1.5"><Badge variant="outline">{a.local}</Badge></td>
-                          <td className="px-2.5 py-1.5 font-mono text-[11px] tabular-nums">{a.linha ?? '—'}</td>
-                          <td className="px-2.5 py-1.5">{a.mensagem}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-4 -mx-6 px-6">
+          {link.erros.length > 0 && (
+            <SecaoItens
+              titulo={`${link.erros.length} ${link.erros.length === 1 ? 'erro' : 'erros'}`}
+              cor="destructive"
+              itens={link.erros}
+              meuLogin={meuLogin}
+              alternarRevisao={alternarRevisao}
+            />
+          )}
+          {link.divergencias.length > 0 && (
+            <SecaoItens
+              titulo={`${link.divergencias.length} divergência${link.divergencias.length === 1 ? '' : 's'} c/ histórico`}
+              cor="warning"
+              itens={link.divergencias}
+              meuLogin={meuLogin}
+              alternarRevisao={alternarRevisao}
+            />
+          )}
+          {link.erros.length === 0 && link.divergencias.length === 0 && (
+            <p className="text-[13px] text-muted-foreground text-center py-8">
+              Nenhum erro ou divergência. {link.estado === 'valido' ? 'Pronto para importar.' : ''}
+            </p>
+          )}
+        </div>
 
         <DialogFooter>
           <Button variant="secondary" onClick={onFechar}>Fechar</Button>
-          {item?.link.urlOriginal && (
-            <Button asChild>
-              <a href={item.link.urlOriginal} target="_blank" rel="noreferrer">
-                <ExternalLink /> Abrir planilha
-              </a>
-            </Button>
-          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
   )
 }
 
-/**
- * Extrai todos os links Google Sheets do texto. Para cada um, pega o trecho da mesma linha
- * antes da URL como rótulo (limpando separadores como ":", "-", "—"). Faz dedupe por idPlanilha.
- * Tolera erros comuns de digitação ("htps://" no lugar de "https://").
- */
-function extrairLinks(texto: string): LinkExtraido[] {
-  const linhas = texto.split(/\r?\n/)
-  const lista: LinkExtraido[] = []
-  const vistos = new Set<string>()
+function SecaoItens({
+  titulo, cor, itens, meuLogin, alternarRevisao,
+}: {
+  titulo: string
+  cor: 'destructive' | 'warning'
+  itens: ItemValidacao[]
+  meuLogin: string | undefined
+  alternarRevisao: (itemId: number, jaRevisado: boolean) => Promise<void>
+}) {
+  const borderClass = cor === 'destructive'
+    ? 'border-[hsl(var(--error-100))]'
+    : 'border-[hsl(20_85%_55%/0.3)]'
+  const bgClass = cor === 'destructive'
+    ? 'bg-[hsl(var(--error-50))]'
+    : 'bg-[hsl(20_85%_55%/0.08)]'
+  const textClass = cor === 'destructive'
+    ? 'text-[hsl(var(--error-700))]'
+    : 'text-[hsl(20_85%_30%)]'
 
-  for (const linha of linhas) {
-    PADRAO_SHEETS_URL.lastIndex = 0
-    let m: RegExpExecArray | null
-    while ((m = PADRAO_SHEETS_URL.exec(linha)) !== null) {
-      const urlBruta = m[0]
-      const idPlanilha = m[1]
-      if (vistos.has(idPlanilha)) continue
-      vistos.add(idPlanilha)
+  return (
+    <div>
+      <div className={cn('text-[11px] uppercase tracking-[0.06em] font-semibold mb-1.5', textClass)}>
+        {titulo}
+      </div>
+      <div className={cn('border rounded-md overflow-hidden', borderClass)}>
+        <table className="w-full text-[12.5px]">
+          <thead>
+            <tr className={bgClass}>
+              <th className={cn('px-2.5 py-1.5 text-left text-[10px] uppercase font-semibold w-[40px]', textClass)}>✓</th>
+              <th className={cn('px-2.5 py-1.5 text-left text-[10px] uppercase font-semibold w-[60px]', textClass)}>Linha</th>
+              <th className={cn('px-2.5 py-1.5 text-left text-[10px] uppercase font-semibold', textClass)}>Detalhe</th>
+              <th className={cn('px-2.5 py-1.5 text-left text-[10px] uppercase font-semibold w-[160px]', textClass)}>Revisores</th>
+            </tr>
+          </thead>
+          <tbody>
+            {itens.map((it) => (
+              <LinhaItem key={it.id} item={it} meuLogin={meuLogin} alternarRevisao={alternarRevisao} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
 
-      const url = urlBruta.startsWith('htps://') ? 'https://' + urlBruta.slice(7) : urlBruta
-      const antesUrl = linha.substring(0, m.index)
-      const rotulo = antesUrl
-        .trim()
-        .replace(/[:\-–—|]\s*$/, '')
-        .trim() || `Link ${lista.length + 1}`
+function LinhaItem({
+  item, meuLogin, alternarRevisao,
+}: {
+  item: ItemValidacao
+  meuLogin: string | undefined
+  alternarRevisao: (itemId: number, jaRevisado: boolean) => Promise<void>
+}) {
+  const [pendente, setPendente] = useState(false)
+  const jaRevisei = meuLogin ? item.revisores.some((r) => r.login === meuLogin) : false
+  const totalRevisores = item.revisores.length
+  const revisado = totalRevisores > 0
 
-      lista.push({ rotulo, url, urlOriginal: urlBruta, idPlanilha })
-    }
+  async function toggle() {
+    if (!meuLogin) return
+    setPendente(true)
+    try { await alternarRevisao(item.id, jaRevisei) } finally { setPendente(false) }
   }
 
-  return lista
+  return (
+    <tr className={cn('border-t', revisado && 'opacity-60')}>
+      <td className="px-2.5 py-1.5">
+        <button
+          onClick={() => void toggle()}
+          disabled={pendente}
+          className={cn(
+            'size-4 rounded border grid place-items-center transition-colors',
+            jaRevisei
+              ? 'bg-[hsl(var(--success-500))] text-white border-[hsl(var(--success-500))]'
+              : 'border-border bg-surface hover:border-foreground/40',
+          )}
+          title={jaRevisei ? 'Desticar (meu nome)' : 'Marcar como revisado'}
+        >
+          {pendente ? <Loader2 className="size-2.5 animate-spin" /> : jaRevisei ? <CheckCircle2 className="size-2.5" /> : null}
+        </button>
+      </td>
+      <td className="px-2.5 py-1.5 font-mono text-[11px] tabular-nums text-muted-foreground">
+        {item.linha ?? '—'}
+      </td>
+      <td className={cn('px-2.5 py-1.5 text-[12.5px]', revisado && 'line-through')}>
+        <DetalheItem item={item} />
+      </td>
+      <td className="px-2.5 py-1.5">
+        <ChipsRevisores revisores={item.revisores} />
+      </td>
+    </tr>
+  )
+}
+
+function DetalheItem({ item }: { item: ItemValidacao }) {
+  if (item.tipo === 'erro') {
+    return (
+      <div>
+        {item.codigo && <LinkCodigoBr codigo={item.codigo} className="mr-2" />}
+        {item.local && <Badge variant="outline" className="mr-1.5">{item.local}</Badge>}
+        {item.campo && <span className="font-mono text-[10.5px] text-muted-foreground mr-1.5">{item.campo}</span>}
+        <span>{item.mensagem}</span>
+      </div>
+    )
+  }
+
+  const payload = decodificarPayload<PayloadDivergencia>(item)
+  return (
+    <div className="flex items-start gap-3 flex-wrap">
+      <div className="flex-1 min-w-0">
+        {item.codigo && <LinkCodigoBr codigo={item.codigo} className="mr-2" />}
+        <span className="text-[10.5px] uppercase tracking-[0.04em] font-semibold text-[hsl(20_85%_35%)] mr-1.5">
+          {item.campo === 'preco' ? 'preço' : 'qtd'}
+        </span>
+        <span>{item.mensagem}</span>
+      </div>
+      {payload && (
+        <div className="text-right shrink-0">
+          <div className="font-mono text-[11px] tabular-nums">
+            {payload.tipo === 'preco'
+              ? payload.valorPlanilha.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+              : payload.valorPlanilha.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}
+          </div>
+          <div className="font-mono text-[10px] text-muted-foreground">
+            faixa {payload.tipo === 'preco'
+              ? `${brl(payload.referenciaMin)} – ${brl(payload.referenciaMax)}`
+              : `${num(payload.referenciaMin)} – ${num(payload.referenciaMax)}`}
+          </div>
+          <div className={cn(
+            'font-mono text-[11px] tabular-nums font-semibold',
+            payload.diferencaPct >= 0 ? 'text-[hsl(20_85%_35%)]' : 'text-[hsl(20_45%_35%)]',
+          )}>
+            {payload.diferencaPct >= 0 ? '+' : '−'}{(Math.abs(payload.diferencaPct) * 100).toFixed(0)}%
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ChipsRevisores({ revisores }: { revisores: { login: string; revisadoEm: string }[] }) {
+  if (revisores.length === 0) {
+    return <span className="text-[11px] text-muted-foreground">—</span>
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {revisores.map((r) => (
+        <span
+          key={r.login}
+          className="inline-flex items-center gap-1 text-[10.5px] bg-[hsl(var(--success-50))] text-[hsl(var(--success-700))] px-1.5 py-0.5 rounded border border-[hsl(var(--success-100))]"
+          title={`Revisado em ${new Date(r.revisadoEm).toLocaleString('pt-BR')}`}
+        >
+          <CheckCircle2 className="size-2.5" />
+          {r.login}
+        </span>
+      ))}
+    </div>
+  )
 }
 
 // ============================================================================
-//  Modais globais — visão agregada com filtros
+//  Modais globais
 // ============================================================================
 
+interface AgregadoItem { link: LinkValidacao; item: ItemValidacao }
+
 function ModalErrosGlobal({
-  aberto, erros, onFechar,
+  aberto, itens, meuLogin, alternarRevisao, onFechar,
 }: {
   aberto: boolean
-  erros: ErroAgregado[]
+  itens: AgregadoItem[]
+  meuLogin: string | undefined
+  alternarRevisao: (itemId: number, jaRevisado: boolean) => Promise<void>
   onFechar: () => void
 }) {
-  const [filtroLocal, setFiltroLocal] = useState<string>('todos')
-  const [filtroCampo, setFiltroCampo] = useState<string>('todos')
+  const [filtroLocal, setFiltroLocal] = useState('todos')
+  const [filtroCampo, setFiltroCampo] = useState('todos')
   const [busca, setBusca] = useState('')
+  const [ocultarRevisados, setOcultarRevisados] = useState(false)
 
-  const camposDisponiveis = useMemo(() => {
-    const set = new Set<string>()
-    erros.forEach((e) => set.add(e.erro.campo))
-    return Array.from(set).sort()
-  }, [erros])
+  const camposDisp = useMemo(() => {
+    const s = new Set<string>()
+    itens.forEach((e) => e.item.campo && s.add(e.item.campo))
+    return Array.from(s).sort()
+  }, [itens])
 
-  const locaisDisponiveis = useMemo(() => {
-    const set = new Set<string>()
-    erros.forEach((e) => set.add(e.erro.local))
-    return Array.from(set).sort()
-  }, [erros])
+  const locaisDisp = useMemo(() => {
+    const s = new Set<string>()
+    itens.forEach((e) => e.item.local && s.add(e.item.local))
+    return Array.from(s).sort()
+  }, [itens])
 
   const filtrados = useMemo(() => {
-    const buscaLc = busca.trim().toLowerCase()
-    return erros.filter((e) => {
-      if (filtroLocal !== 'todos' && e.erro.local !== filtroLocal) return false
-      if (filtroCampo !== 'todos' && e.erro.campo !== filtroCampo) return false
-      if (buscaLc) {
-        const hay = `${e.erro.mensagem} ${e.link.rotulo}`.toLowerCase()
-        if (!hay.includes(buscaLc)) return false
+    const lc = busca.trim().toLowerCase()
+    return itens.filter((e) => {
+      if (filtroLocal !== 'todos' && e.item.local !== filtroLocal) return false
+      if (filtroCampo !== 'todos' && e.item.campo !== filtroCampo) return false
+      if (ocultarRevisados && e.item.revisores.length > 0) return false
+      if (lc) {
+        const hay = `${e.item.mensagem} ${e.link.rotulo ?? ''}`.toLowerCase()
+        if (!hay.includes(lc)) return false
       }
       return true
     })
-  }, [erros, filtroLocal, filtroCampo, busca])
+  }, [itens, filtroLocal, filtroCampo, busca, ocultarRevisados])
 
   return (
     <Dialog open={aberto} onOpenChange={(open) => { if (!open) onFechar() }}>
@@ -624,72 +929,56 @@ function ModalErrosGlobal({
           <div className="flex size-10 items-center justify-center rounded-[10px] bg-[hsl(var(--error-50))] text-[hsl(var(--error-500))] mb-1">
             <XCircle className="size-5" />
           </div>
-          <DialogTitle>Todos os erros · {erros.length}</DialogTitle>
+          <DialogTitle>Todos os erros · {itens.length}</DialogTitle>
           <DialogDescription>
-            Erros agregados de todas as planilhas validadas. Use os filtros pra focar em um tipo específico (CPF, código, unidade…).
+            Erros agregados de todas as planilhas ativas. Tique os que já foram conferidos — risca e marca seu nome.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 sm:grid-cols-[150px_220px_1fr] gap-2 items-center">
-          <select
-            value={filtroLocal}
-            onChange={(e) => setFiltroLocal(e.target.value)}
-            className="h-9 px-2 text-[13px] border border-input rounded-md bg-surface"
-          >
+        <div className="grid grid-cols-1 sm:grid-cols-[150px_220px_180px_1fr] gap-2 items-center">
+          <select value={filtroLocal} onChange={(e) => setFiltroLocal(e.target.value)}
+            className="h-9 px-2 text-[13px] border border-input rounded-md bg-surface">
             <option value="todos">Todos os locais</option>
-            {locaisDisponiveis.map((l) => <option key={l} value={l}>{l}</option>)}
+            {locaisDisp.map((l) => <option key={l} value={l}>{l}</option>)}
           </select>
-          <select
-            value={filtroCampo}
-            onChange={(e) => setFiltroCampo(e.target.value)}
-            className="h-9 px-2 text-[13px] border border-input rounded-md bg-surface font-mono"
-          >
+          <select value={filtroCampo} onChange={(e) => setFiltroCampo(e.target.value)}
+            className="h-9 px-2 text-[13px] border border-input rounded-md bg-surface font-mono">
             <option value="todos">Todos os campos</option>
-            {camposDisponiveis.map((c) => <option key={c} value={c}>{c}</option>)}
+            {camposDisp.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
+          <label className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground select-none">
+            <input type="checkbox" checked={ocultarRevisados} onChange={(e) => setOcultarRevisados(e.target.checked)} />
+            Ocultar revisados
+          </label>
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-            <Input
-              placeholder="Buscar na mensagem ou rótulo…"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-              className="pl-8"
-            />
+            <Input placeholder="Buscar mensagem ou rótulo…" value={busca} onChange={(e) => setBusca(e.target.value)} className="pl-8" />
           </div>
         </div>
 
         <div className="text-[12px] text-muted-foreground">
-          Mostrando <strong className="text-foreground">{filtrados.length}</strong> de {erros.length}
+          Mostrando <strong className="text-foreground">{filtrados.length}</strong> de {itens.length}
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto border border-border rounded-md">
           <table className="w-full text-[13px]">
             <thead className="sticky top-0 bg-[hsl(var(--neutral-25))]">
               <tr className="text-left">
-                <th className="px-3 py-2 text-[10.5px] uppercase tracking-[0.05em] font-semibold text-muted-foreground border-b border-border w-[180px]">Planilha</th>
-                <th className="px-3 py-2 text-[10.5px] uppercase tracking-[0.05em] font-semibold text-muted-foreground border-b border-border w-[100px]">Local</th>
-                <th className="px-3 py-2 text-[10.5px] uppercase tracking-[0.05em] font-semibold text-muted-foreground border-b border-border w-[60px]">Linha</th>
-                <th className="px-3 py-2 text-[10.5px] uppercase tracking-[0.05em] font-semibold text-muted-foreground border-b border-border w-[170px]">Campo</th>
-                <th className="px-3 py-2 text-[10.5px] uppercase tracking-[0.05em] font-semibold text-muted-foreground border-b border-border">Mensagem</th>
+                <ThSmall className="w-[36px]">✓</ThSmall>
+                <ThSmall className="w-[180px]">Planilha</ThSmall>
+                <ThSmall className="w-[100px]">Local</ThSmall>
+                <ThSmall className="w-[60px]">Linha</ThSmall>
+                <ThSmall className="w-[160px]">Campo</ThSmall>
+                <ThSmall>Mensagem</ThSmall>
+                <ThSmall className="w-[180px]">Revisores</ThSmall>
               </tr>
             </thead>
             <tbody>
-              {filtrados.map((e, idx) => (
-                <tr key={idx} className="border-b border-[hsl(var(--neutral-100))] last:border-b-0 hover:bg-[hsl(var(--neutral-25))]">
-                  <td className="px-3 py-2">
-                    <a href={e.link.urlOriginal} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-[12.5px] font-medium hover:text-[hsl(var(--brand-600))]">
-                      <ExternalLink className="size-3 opacity-60" />
-                      <span className="truncate max-w-[150px]" title={e.link.rotulo}>{e.link.rotulo}</span>
-                    </a>
-                  </td>
-                  <td className="px-3 py-2"><Badge variant="outline">{e.erro.local}</Badge></td>
-                  <td className="px-3 py-2 font-mono text-[11.5px] tabular-nums text-muted-foreground">{e.erro.linha ?? '—'}</td>
-                  <td className="px-3 py-2 font-mono text-[11.5px]">{e.erro.campo}</td>
-                  <td className="px-3 py-2 text-[12.5px]">{e.erro.mensagem}</td>
-                </tr>
+              {filtrados.map((e) => (
+                <LinhaItemGlobal key={e.item.id} item={e.item} link={e.link} meuLogin={meuLogin} alternarRevisao={alternarRevisao} />
               ))}
               {filtrados.length === 0 && (
-                <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground text-[12.5px]">Nenhum erro com esses filtros.</td></tr>
+                <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground text-[12.5px]">Nada com esses filtros.</td></tr>
               )}
             </tbody>
           </table>
@@ -704,32 +993,38 @@ function ModalErrosGlobal({
 }
 
 function ModalDivergenciasGlobal({
-  aberto, divergencias, onFechar,
+  aberto, itens, meuLogin, alternarRevisao, onFechar,
 }: {
   aberto: boolean
-  divergencias: DivergenciaAgregada[]
+  itens: AgregadoItem[]
+  meuLogin: string | undefined
+  alternarRevisao: (itemId: number, jaRevisado: boolean) => Promise<void>
   onFechar: () => void
 }) {
   const [filtroTipo, setFiltroTipo] = useState<'todos' | 'preco' | 'qtd'>('todos')
   const [filtroMinPct, setFiltroMinPct] = useState<number>(0)
   const [busca, setBusca] = useState('')
+  const [ocultarRevisados, setOcultarRevisados] = useState(false)
   const [ordem, setOrdem] = useState<'pct-desc' | 'pct-asc' | 'natural'>('pct-desc')
 
   const filtrados = useMemo(() => {
-    const buscaLc = busca.trim().toLowerCase()
-    const arr = divergencias.filter((d) => {
-      if (filtroTipo !== 'todos' && d.divergencia.tipo !== filtroTipo) return false
-      if ((d.divergencia.diferencaPct * 100) < filtroMinPct) return false
-      if (buscaLc) {
-        const hay = `${d.divergencia.codigo} ${d.divergencia.mensagem} ${d.link.rotulo}`.toLowerCase()
-        if (!hay.includes(buscaLc)) return false
+    const lc = busca.trim().toLowerCase()
+    const arr = itens.filter((e) => {
+      const tipo = e.item.campo
+      if (filtroTipo !== 'todos' && tipo !== filtroTipo) return false
+      const delta = Math.abs(e.item.deltaPct ?? 0)
+      if (delta * 100 < filtroMinPct) return false
+      if (ocultarRevisados && e.item.revisores.length > 0) return false
+      if (lc) {
+        const hay = `${e.item.codigo ?? ''} ${e.item.mensagem} ${e.link.rotulo ?? ''}`.toLowerCase()
+        if (!hay.includes(lc)) return false
       }
       return true
     })
-    if (ordem === 'pct-desc') arr.sort((a, b) => b.divergencia.diferencaPct - a.divergencia.diferencaPct)
-    else if (ordem === 'pct-asc') arr.sort((a, b) => a.divergencia.diferencaPct - b.divergencia.diferencaPct)
+    if (ordem === 'pct-desc') arr.sort((a, b) => Math.abs(b.item.deltaPct ?? 0) - Math.abs(a.item.deltaPct ?? 0))
+    else if (ordem === 'pct-asc') arr.sort((a, b) => Math.abs(a.item.deltaPct ?? 0) - Math.abs(b.item.deltaPct ?? 0))
     return arr
-  }, [divergencias, filtroTipo, filtroMinPct, busca, ordem])
+  }, [itens, filtroTipo, filtroMinPct, busca, ordem, ocultarRevisados])
 
   return (
     <Dialog open={aberto} onOpenChange={(open) => { if (!open) onFechar() }}>
@@ -738,105 +1033,68 @@ function ModalDivergenciasGlobal({
           <div className="flex size-10 items-center justify-center rounded-[10px] bg-[hsl(20_85%_55%/0.15)] text-[hsl(20_85%_45%)] mb-1">
             <Scale className="size-5" />
           </div>
-          <DialogTitle>Divergências c/ histórico · {divergencias.length}</DialogTitle>
+          <DialogTitle>Divergências c/ histórico · {itens.length}</DialogTitle>
           <DialogDescription>
-            Cruza preço e quantidade da planilha com a média histórica do Compras.gov.br. Não bloqueia, mas vale conferir os outliers.
+            Valores fora da banda histórica (min/max + 50% margem). Tique os já conferidos pra esconder do dia-a-dia.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 sm:grid-cols-[150px_180px_140px_1fr] gap-2 items-center">
-          <select
-            value={filtroTipo}
-            onChange={(e) => setFiltroTipo(e.target.value as 'todos' | 'preco' | 'qtd')}
-            className="h-9 px-2 text-[13px] border border-input rounded-md bg-surface"
-          >
+        <div className="grid grid-cols-1 sm:grid-cols-[140px_160px_140px_140px_1fr] gap-2 items-center">
+          <select value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value as 'todos' | 'preco' | 'qtd')}
+            className="h-9 px-2 text-[13px] border border-input rounded-md bg-surface">
             <option value="todos">Preço e qtd</option>
             <option value="preco">Só preço</option>
             <option value="qtd">Só quantidade</option>
           </select>
-          <select
-            value={filtroMinPct}
-            onChange={(e) => setFiltroMinPct(Number(e.target.value))}
-            className="h-9 px-2 text-[13px] border border-input rounded-md bg-surface"
-          >
+          <select value={filtroMinPct} onChange={(e) => setFiltroMinPct(Number(e.target.value))}
+            className="h-9 px-2 text-[13px] border border-input rounded-md bg-surface">
             <option value={0}>Δ mínima: qualquer</option>
             <option value={100}>Δ ≥ 100%</option>
-            <option value={200}>Δ ≥ 200%</option>
             <option value={500}>Δ ≥ 500%</option>
             <option value={1000}>Δ ≥ 1.000%</option>
             <option value={10000}>Δ ≥ 10.000%</option>
           </select>
-          <select
-            value={ordem}
-            onChange={(e) => setOrdem(e.target.value as 'pct-desc' | 'pct-asc' | 'natural')}
-            className="h-9 px-2 text-[13px] border border-input rounded-md bg-surface"
-          >
+          <select value={ordem} onChange={(e) => setOrdem(e.target.value as 'pct-desc' | 'pct-asc' | 'natural')}
+            className="h-9 px-2 text-[13px] border border-input rounded-md bg-surface">
             <option value="pct-desc">Maior Δ primeiro</option>
             <option value="pct-asc">Menor Δ primeiro</option>
             <option value="natural">Ordem original</option>
           </select>
+          <label className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground select-none">
+            <input type="checkbox" checked={ocultarRevisados} onChange={(e) => setOcultarRevisados(e.target.checked)} />
+            Ocultar revisados
+          </label>
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-            <Input
-              placeholder="Buscar código ou planilha…"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-              className="pl-8"
-            />
+            <Input placeholder="Buscar código ou rótulo…" value={busca} onChange={(e) => setBusca(e.target.value)} className="pl-8" />
           </div>
         </div>
 
         <div className="text-[12px] text-muted-foreground">
-          Mostrando <strong className="text-foreground">{filtrados.length}</strong> de {divergencias.length}
+          Mostrando <strong className="text-foreground">{filtrados.length}</strong> de {itens.length}
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto border border-[hsl(20_85%_55%/0.3)] rounded-md">
           <table className="w-full text-[13px]">
             <thead className="sticky top-0 bg-[hsl(20_85%_55%/0.08)]">
               <tr className="text-left">
-                <th className="px-3 py-2 text-[10.5px] uppercase tracking-[0.05em] font-semibold text-[hsl(20_85%_30%)] border-b border-[hsl(20_85%_55%/0.2)] w-[160px]">Planilha</th>
-                <th className="px-3 py-2 text-[10.5px] uppercase tracking-[0.05em] font-semibold text-[hsl(20_85%_30%)] border-b border-[hsl(20_85%_55%/0.2)] w-[60px]">Linha</th>
-                <th className="px-3 py-2 text-[10.5px] uppercase tracking-[0.05em] font-semibold text-[hsl(20_85%_30%)] border-b border-[hsl(20_85%_55%/0.2)] w-[90px]">Código</th>
-                <th className="px-3 py-2 text-[10.5px] uppercase tracking-[0.05em] font-semibold text-[hsl(20_85%_30%)] border-b border-[hsl(20_85%_55%/0.2)] w-[70px]">Campo</th>
-                <th className="px-3 py-2 text-[10.5px] uppercase tracking-[0.05em] font-semibold text-[hsl(20_85%_30%)] border-b border-[hsl(20_85%_55%/0.2)] w-[130px] text-right">Planilha</th>
-                <th className="px-3 py-2 text-[10.5px] uppercase tracking-[0.05em] font-semibold text-[hsl(20_85%_30%)] border-b border-[hsl(20_85%_55%/0.2)] w-[130px] text-right">Histórico</th>
-                <th className="px-3 py-2 text-[10.5px] uppercase tracking-[0.05em] font-semibold text-[hsl(20_85%_30%)] border-b border-[hsl(20_85%_55%/0.2)] w-[90px] text-right">Δ</th>
+                <ThSmallLaranja className="w-[36px]">✓</ThSmallLaranja>
+                <ThSmallLaranja className="w-[160px]">Planilha</ThSmallLaranja>
+                <ThSmallLaranja className="w-[60px]">Linha</ThSmallLaranja>
+                <ThSmallLaranja className="w-[90px]">Código</ThSmallLaranja>
+                <ThSmallLaranja className="w-[60px]">Campo</ThSmallLaranja>
+                <ThSmallLaranja className="w-[120px] text-right">Planilha</ThSmallLaranja>
+                <ThSmallLaranja className="w-[160px] text-right">Faixa histórica</ThSmallLaranja>
+                <ThSmallLaranja className="w-[80px] text-right">Δ</ThSmallLaranja>
+                <ThSmallLaranja className="w-[170px]">Revisores</ThSmallLaranja>
               </tr>
             </thead>
             <tbody>
-              {filtrados.map((d, idx) => (
-                <tr key={idx} className="border-b border-[hsl(20_85%_55%/0.15)] last:border-b-0 hover:bg-[hsl(20_85%_55%/0.04)]">
-                  <td className="px-3 py-2">
-                    <a href={d.link.urlOriginal} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-[12.5px] font-medium hover:text-[hsl(var(--brand-600))]">
-                      <ExternalLink className="size-3 opacity-60" />
-                      <span className="truncate max-w-[130px]" title={d.link.rotulo}>{d.link.rotulo}</span>
-                    </a>
-                  </td>
-                  <td className="px-3 py-2 font-mono text-[11.5px] tabular-nums text-muted-foreground">{d.divergencia.linha ?? '—'}</td>
-                  <td className="px-3 py-2 font-mono text-[11.5px]"><LinkCodigoBr codigo={d.divergencia.codigo} /></td>
-                  <td className="px-3 py-2 text-[10.5px] uppercase font-semibold text-[hsl(20_85%_35%)] tracking-[0.04em]">
-                    {d.divergencia.tipo === 'preco' ? 'preço' : 'qtd'}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-[12px] tabular-nums text-right">
-                    {d.divergencia.tipo === 'preco'
-                      ? d.divergencia.valorPlanilha.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-                      : d.divergencia.valorPlanilha.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-[12px] tabular-nums text-right text-muted-foreground">
-                    {d.divergencia.tipo === 'preco'
-                      ? d.divergencia.valorReferencia.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-                      : d.divergencia.valorReferencia.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}
-                    <span className="block text-[10px]">{d.divergencia.totalRegistros} reg · {d.divergencia.siglaReferencia}</span>
-                  </td>
-                  <td className="px-3 py-2 font-mono text-[12px] tabular-nums text-right">
-                    <span className={d.divergencia.valorPlanilha > d.divergencia.valorReferencia ? 'text-[hsl(20_85%_35%)] font-semibold' : 'text-[hsl(20_45%_35%)]'}>
-                      {d.divergencia.valorPlanilha > d.divergencia.valorReferencia ? '+' : '−'}{(d.divergencia.diferencaPct * 100).toFixed(0)}%
-                    </span>
-                  </td>
-                </tr>
+              {filtrados.map((e) => (
+                <LinhaDivGlobal key={e.item.id} item={e.item} link={e.link} meuLogin={meuLogin} alternarRevisao={alternarRevisao} />
               ))}
               {filtrados.length === 0 && (
-                <tr><td colSpan={7} className="px-3 py-8 text-center text-muted-foreground text-[12.5px]">Nenhuma divergência com esses filtros.</td></tr>
+                <tr><td colSpan={9} className="px-3 py-8 text-center text-muted-foreground text-[12.5px]">Nada com esses filtros.</td></tr>
               )}
             </tbody>
           </table>
@@ -844,6 +1102,401 @@ function ModalDivergenciasGlobal({
 
         <DialogFooter>
           <Button variant="secondary" onClick={onFechar}>Fechar</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function LinhaItemGlobal({
+  item, link, meuLogin, alternarRevisao,
+}: {
+  item: ItemValidacao
+  link: LinkValidacao
+  meuLogin: string | undefined
+  alternarRevisao: (itemId: number, jaRevisado: boolean) => Promise<void>
+}) {
+  const [pendente, setPendente] = useState(false)
+  const jaRevisei = meuLogin ? item.revisores.some((r) => r.login === meuLogin) : false
+  const revisado = item.revisores.length > 0
+  return (
+    <tr className={cn('border-b border-[hsl(var(--neutral-100))] last:border-b-0 hover:bg-[hsl(var(--neutral-25))]', revisado && 'opacity-60')}>
+      <td className="px-3 py-2">
+        <button
+          onClick={async () => { setPendente(true); try { await alternarRevisao(item.id, jaRevisei) } finally { setPendente(false) } }}
+          disabled={pendente || !meuLogin}
+          className={cn(
+            'size-4 rounded border grid place-items-center',
+            jaRevisei
+              ? 'bg-[hsl(var(--success-500))] text-white border-[hsl(var(--success-500))]'
+              : 'border-border bg-surface hover:border-foreground/40',
+          )}
+        >
+          {pendente ? <Loader2 className="size-2.5 animate-spin" /> : jaRevisei ? <CheckCircle2 className="size-2.5" /> : null}
+        </button>
+      </td>
+      <td className="px-3 py-2">
+        <a href={link.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-[12.5px] font-medium hover:text-[hsl(var(--brand-600))]">
+          <ExternalLink className="size-3 opacity-60" />
+          <span className="truncate max-w-[150px]">{link.rotulo ?? '—'}</span>
+        </a>
+      </td>
+      <td className="px-3 py-2"><Badge variant="outline">{item.local}</Badge></td>
+      <td className="px-3 py-2 font-mono text-[11.5px] tabular-nums text-muted-foreground">{item.linha ?? '—'}</td>
+      <td className="px-3 py-2 font-mono text-[11.5px]">{item.campo}</td>
+      <td className={cn('px-3 py-2 text-[12.5px]', revisado && 'line-through')}>{item.mensagem}</td>
+      <td className="px-3 py-2"><ChipsRevisores revisores={item.revisores} /></td>
+    </tr>
+  )
+}
+
+function LinhaDivGlobal({
+  item, link, meuLogin, alternarRevisao,
+}: {
+  item: ItemValidacao
+  link: LinkValidacao
+  meuLogin: string | undefined
+  alternarRevisao: (itemId: number, jaRevisado: boolean) => Promise<void>
+}) {
+  const [pendente, setPendente] = useState(false)
+  const jaRevisei = meuLogin ? item.revisores.some((r) => r.login === meuLogin) : false
+  const revisado = item.revisores.length > 0
+  const payload = decodificarPayload<PayloadDivergencia>(item)
+  return (
+    <tr className={cn('border-b border-[hsl(20_85%_55%/0.15)] last:border-b-0 hover:bg-[hsl(20_85%_55%/0.04)]', revisado && 'opacity-60')}>
+      <td className="px-3 py-2">
+        <button
+          onClick={async () => { setPendente(true); try { await alternarRevisao(item.id, jaRevisei) } finally { setPendente(false) } }}
+          disabled={pendente || !meuLogin}
+          className={cn(
+            'size-4 rounded border grid place-items-center',
+            jaRevisei
+              ? 'bg-[hsl(var(--success-500))] text-white border-[hsl(var(--success-500))]'
+              : 'border-border bg-surface hover:border-foreground/40',
+          )}
+        >
+          {pendente ? <Loader2 className="size-2.5 animate-spin" /> : jaRevisei ? <CheckCircle2 className="size-2.5" /> : null}
+        </button>
+      </td>
+      <td className="px-3 py-2">
+        <a href={link.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-[12.5px] font-medium hover:text-[hsl(var(--brand-600))]">
+          <ExternalLink className="size-3 opacity-60" />
+          <span className="truncate max-w-[130px]">{link.rotulo ?? '—'}</span>
+        </a>
+      </td>
+      <td className="px-3 py-2 font-mono text-[11.5px] tabular-nums text-muted-foreground">{item.linha ?? '—'}</td>
+      <td className="px-3 py-2 font-mono text-[11.5px]">
+        {item.codigo ? <LinkCodigoBr codigo={item.codigo} /> : '—'}
+      </td>
+      <td className="px-3 py-2 text-[10.5px] uppercase font-semibold text-[hsl(20_85%_35%)]">
+        {item.campo === 'preco' ? 'preço' : 'qtd'}
+      </td>
+      <td className="px-3 py-2 font-mono text-[12px] tabular-nums text-right">
+        {payload ? (payload.tipo === 'preco' ? brl(payload.valorPlanilha) : num(payload.valorPlanilha)) : '—'}
+      </td>
+      <td className="px-3 py-2 font-mono text-[11.5px] tabular-nums text-right text-muted-foreground">
+        {payload ? (payload.tipo === 'preco'
+          ? `${brl(payload.referenciaMin)} – ${brl(payload.referenciaMax)}`
+          : `${num(payload.referenciaMin)} – ${num(payload.referenciaMax)}`)
+          : '—'}
+        {payload && <span className="block text-[10px]">{payload.totalRegistros} reg · {payload.siglaReferencia}</span>}
+      </td>
+      <td className="px-3 py-2 font-mono text-[12px] tabular-nums text-right">
+        {item.deltaPct != null && (
+          <span className={item.deltaPct >= 0 ? 'text-[hsl(20_85%_35%)] font-semibold' : 'text-[hsl(20_45%_35%)]'}>
+            {item.deltaPct >= 0 ? '+' : '−'}{(Math.abs(item.deltaPct) * 100).toFixed(0)}%
+          </span>
+        )}
+      </td>
+      <td className="px-3 py-2"><ChipsRevisores revisores={item.revisores} /></td>
+    </tr>
+  )
+}
+
+// ============================================================================
+//  Componentes auxiliares
+// ============================================================================
+
+function StatusBadge({ estado }: { estado: EstadoLink }) {
+  if (estado === 'pendente') return <Badge variant="muted">pendente</Badge>
+  if (estado === 'validando') return (
+    <span className="inline-flex items-center gap-1.5 text-[11px] text-[hsl(var(--brand-700))] font-semibold uppercase tracking-[0.04em]">
+      <Loader2 className="size-3 animate-spin" /> validando
+    </span>
+  )
+  if (estado === 'valido') return <Badge variant="success" comDot>válido</Badge>
+  if (estado === 'invalido') return <Badge variant="destructive" comDot>com erros</Badge>
+  return <Badge variant="destructive" comDot>falhou</Badge>
+}
+
+function Th({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <th className={cn('px-3.5 py-2.5 text-[11px] uppercase tracking-[0.05em] font-semibold text-muted-foreground bg-[hsl(var(--neutral-25))] border-b border-border', className)}>{children}</th>
+}
+function Td({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <td className={cn('px-3.5 py-1.5 align-middle', className)}>{children}</td>
+}
+function ThSmall({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <th className={cn('px-3 py-2 text-[10.5px] uppercase tracking-[0.05em] font-semibold text-muted-foreground border-b border-border', className)}>{children}</th>
+}
+function ThSmallLaranja({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <th className={cn('px-3 py-2 text-[10.5px] uppercase tracking-[0.05em] font-semibold text-[hsl(20_85%_30%)] border-b border-[hsl(20_85%_55%/0.2)]', className)}>{children}</th>
+}
+
+const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const num = (v: number) => v.toLocaleString('pt-BR', { maximumFractionDigits: 2 })
+
+// Placeholder pra confirmação de importação duplicada (futuro: integra com /confirmarDuplicado)
+function DialogConfirmarImportar() {
+  return null
+}
+
+// ============================================================================
+//  Resumo do diff (comparar lote)
+// ============================================================================
+
+function ResumoDiff({ diff, onFechar }: { diff: DiffLote; onFechar: () => void }) {
+  const [secao, setSecao] = useState<'adicionados' | 'duplicados' | 'ausentes'>(
+    diff.adicionados.length > 0 ? 'adicionados' :
+    diff.duplicados.length > 0 ? 'duplicados' : 'ausentes'
+  )
+
+  const nada = diff.adicionados.length === 0 && diff.duplicados.length === 0 && diff.ausentes.length === 0
+
+  return (
+    <Card className="border-[hsl(var(--brand-200))]">
+      <CardHeader>
+        <div className="min-w-0 flex-1">
+          <CardTitle><Search />Comparação concluída</CardTitle>
+          <CardDescription>
+            <span className="text-[hsl(var(--success-700))]">{diff.adicionados.length} adicionados</span>
+            {' · '}
+            <span className="text-[hsl(var(--warning-700))]">{diff.duplicados.length} já estavam</span>
+            {' · '}
+            <span className="text-[hsl(var(--info-700))]">{diff.ausentes.length} ausentes do texto colado</span>
+            {nada && ' · nenhuma URL encontrada no texto'}
+          </CardDescription>
+        </div>
+        <Button variant="ghost" size="sm" onClick={onFechar}>Fechar</Button>
+      </CardHeader>
+
+      {!nada && (
+        <>
+          <div className="px-[18px] flex gap-1">
+            <BotaoSecao ativo={secao === 'adicionados'} onClick={() => setSecao('adicionados')}>
+              Adicionados ({diff.adicionados.length})
+            </BotaoSecao>
+            <BotaoSecao ativo={secao === 'duplicados'} onClick={() => setSecao('duplicados')}>
+              Já estavam ({diff.duplicados.length})
+            </BotaoSecao>
+            <BotaoSecao ativo={secao === 'ausentes'} onClick={() => setSecao('ausentes')}>
+              Ausentes ({diff.ausentes.length})
+            </BotaoSecao>
+          </div>
+
+          <div className="px-[18px] pb-[18px] pt-3">
+            {secao === 'adicionados' && (
+              diff.adicionados.length === 0 ? <VazioDiff>Nada novo no texto.</VazioDiff> : (
+                <ListaSimplesLinks itens={diff.adicionados.map((l) => ({ id: l.id, rotulo: l.rotulo, url: l.url, idPlanilha: l.idPlanilha }))} />
+              )
+            )}
+            {secao === 'duplicados' && (
+              diff.duplicados.length === 0 ? <VazioDiff>Nenhuma URL do texto já estava cadastrada.</VazioDiff> : (
+                <ListaDuplicados itens={diff.duplicados} />
+              )
+            )}
+            {secao === 'ausentes' && (
+              diff.ausentes.length === 0 ? <VazioDiff>Todos os links da lista atual apareceram no texto.</VazioDiff> : (
+                <ListaAusentes itens={diff.ausentes} />
+              )
+            )}
+          </div>
+        </>
+      )}
+    </Card>
+  )
+}
+
+function BotaoSecao({ ativo, onClick, children }: { ativo: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'px-3 py-1.5 text-[12px] font-medium rounded-md',
+        ativo ? 'bg-[hsl(var(--brand-50))] text-[hsl(var(--brand-700))]' : 'text-muted-foreground hover:bg-[hsl(var(--neutral-50))]',
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+function VazioDiff({ children }: { children: React.ReactNode }) {
+  return <div className="text-[13px] text-muted-foreground py-6 text-center">{children}</div>
+}
+
+function ListaSimplesLinks({ itens }: { itens: { id: number; rotulo: string | null; url: string; idPlanilha: string }[] }) {
+  return (
+    <ul className="divide-y divide-border border border-border rounded-md">
+      {itens.map((l) => (
+        <li key={l.id} className="flex items-center gap-3 px-3 py-2 text-[13px]">
+          <Badge variant="success">novo</Badge>
+          <span className="font-medium truncate flex-1">{l.rotulo ?? l.idPlanilha}</span>
+          <a href={l.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11.5px] text-muted-foreground hover:text-[hsl(var(--brand-600))] truncate max-w-[420px]">
+            <ExternalLink className="size-3 opacity-60" />
+            <span className="truncate">{l.url}</span>
+          </a>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function ListaDuplicados({ itens }: { itens: DuplicadoLote[] }) {
+  return (
+    <ul className="divide-y divide-border border border-border rounded-md">
+      {itens.map((d) => (
+        <li key={d.linkExistenteId} className="flex items-center gap-3 px-3 py-2 text-[13px]">
+          <Badge variant="warning">já estava</Badge>
+          <div className="flex-1 min-w-0">
+            <div className="font-medium truncate">{d.rotuloExistente ?? d.idPlanilha}</div>
+            {d.rotuloColado && d.rotuloColado !== d.rotuloExistente && (
+              <div className="text-[11px] text-muted-foreground">colado como: {d.rotuloColado}</div>
+            )}
+          </div>
+          <a href={d.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11.5px] text-muted-foreground hover:text-[hsl(var(--brand-600))] truncate max-w-[380px]">
+            <ExternalLink className="size-3 opacity-60" />
+            <span className="truncate">{d.url}</span>
+          </a>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function ListaAusentes({ itens }: { itens: AusenteLote[] }) {
+  return (
+    <div className="space-y-2">
+      <div className="text-[12px] text-muted-foreground">
+        Estes links já estavam na lista ativa, mas não apareceram no texto que você colou. Eles continuam ativos — se quiser, exclua manualmente.
+      </div>
+      <ul className="divide-y divide-border border border-border rounded-md">
+        {itens.map((a) => (
+          <li key={a.linkId} className="flex items-center gap-3 px-3 py-2 text-[13px]">
+            <Badge variant="info">ausente</Badge>
+            <span className="font-medium truncate flex-1">{a.rotulo ?? a.idPlanilha}</span>
+            <span className="text-[11px] text-muted-foreground">{a.estado}</span>
+            <a href={a.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11.5px] text-muted-foreground hover:text-[hsl(var(--brand-600))] truncate max-w-[380px]">
+              <ExternalLink className="size-3 opacity-60" />
+              <span className="truncate">{a.url}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+// ============================================================================
+//  Dialog: adicionar 1 link (sem checagem de duplicado/ausente)
+// ============================================================================
+
+function DialogAdicionarUnitario({
+  aberto, onFechar, onAdicionar,
+}: {
+  aberto: boolean
+  onFechar: () => void
+  onAdicionar: (url: string, opts?: { rotulo?: string; classe?: string; numeroGrupo?: number }) => Promise<void>
+}) {
+  const [url, setUrl] = useState('')
+  const [classe, setClasse] = useState<string>('INSUMOS')
+  const [numero, setNumero] = useState<string>('')
+  const [enviando, setEnviando] = useState(false)
+  const [erroLocal, setErroLocal] = useState<string | null>(null)
+
+  function reset() {
+    setUrl('')
+    setNumero('')
+    setErroLocal(null)
+  }
+
+  async function aoConfirmar() {
+    setEnviando(true)
+    setErroLocal(null)
+    try {
+      const n = numero.trim() ? parseInt(numero.trim(), 10) : undefined
+      if (numero.trim() && (isNaN(n!) || n! < 1)) {
+        throw new Error('Número do grupo deve ser inteiro ≥ 1.')
+      }
+      await onAdicionar(url.trim(), {
+        classe: classe || undefined,
+        numeroGrupo: n,
+      })
+      reset()
+      onFechar()
+    } catch (e) {
+      setErroLocal(e instanceof Error ? e.message : String(e))
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  return (
+    <Dialog open={aberto} onOpenChange={(open) => { if (!open && !enviando) { reset(); onFechar() } }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <div className="flex size-10 items-center justify-center rounded-[10px] bg-[hsl(var(--brand-50))] text-[hsl(var(--brand-600))] mb-1">
+            <ListChecks className="size-5" />
+          </div>
+          <DialogTitle>Adicionar 1 link</DialogTitle>
+          <DialogDescription>
+            Adição direta — não compara com a lista atual. O rótulo será gerado como "Grupo X" se você informar o número.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <label className="text-[12px] font-medium text-[hsl(var(--neutral-700))]">URL do Google Sheets</label>
+            <Input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://docs.google.com/spreadsheets/d/..."
+              className="font-mono text-[12px]"
+              autoFocus
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1.5">
+              <label className="text-[12px] font-medium text-[hsl(var(--neutral-700))]">Classe</label>
+              <select
+                value={classe}
+                onChange={(e) => setClasse(e.target.value)}
+                className="h-9 w-full px-2 text-[13px] border border-input rounded-md bg-surface"
+              >
+                {CLASSES_PADRAO.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[12px] font-medium text-[hsl(var(--neutral-700))]">Número do grupo</label>
+              <Input
+                value={numero}
+                onChange={(e) => setNumero(e.target.value.replace(/\D/g, ''))}
+                placeholder="Ex: 42"
+                inputMode="numeric"
+              />
+            </div>
+          </div>
+          {erroLocal && (
+            <Alert variant="destructive">
+              <AlertTriangle />
+              <AlertDescription>{erroLocal}</AlertDescription>
+            </Alert>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="secondary" onClick={onFechar} disabled={enviando}>Cancelar</Button>
+          <Button onClick={() => void aoConfirmar()} disabled={enviando || !url.trim()}>
+            {enviando && <Loader2 className="animate-spin" />}
+            {enviando ? 'Adicionando…' : 'Adicionar'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
