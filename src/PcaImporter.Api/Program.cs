@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
+using PcaImporter.Api.Controllers;
 using PcaImporter.Api.Hubs;
 using PcaImporter.Application.Validacao;
 using PcaImporter.Infrastructure;
@@ -13,6 +14,16 @@ builder.Services.AddControllers().AddJsonOptions(opt =>
 });
 builder.Services.AddOpenApi();
 builder.Services.AddSignalR();
+
+// CORS aberto APENAS para endpoints públicos de consulta (api/consulta/*).
+// Aplicado via [EnableCors] no controller, não globalmente.
+builder.Services.AddCors(opt =>
+{
+    opt.AddPolicy(ConsultaCors.PolicyName, policy => policy
+        .AllowAnyOrigin()
+        .AllowAnyMethod()
+        .AllowAnyHeader());
+});
 
 // Persiste as chaves de Data Protection num diretório do volume.
 // Sem isso, cookies de auth seriam invalidados a cada restart do container.
@@ -84,6 +95,9 @@ if (app.Environment.IsDevelopment())
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
+
+// CORS antes da auth para que o preflight OPTIONS responda sem cookie.
+app.UseCors();
 
 app.UseAuthentication();
 app.UseAuthorization();

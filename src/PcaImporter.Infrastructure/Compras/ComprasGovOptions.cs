@@ -10,6 +10,18 @@ public sealed class ComprasGovOptions
 
     public TokenOptions Token { get; set; } = new();
 
+    public ConsultaOptions Consulta { get; set; } = new();
+
+    public sealed class ConsultaOptions
+    {
+        /// <summary>
+        /// Id de artefato padrão usado no path do gateway para a chamada de
+        /// nome por CPF (qualquer artefato válido autoriza). Pode ser sobrescrito
+        /// na chamada via query string ?artefatoId=...
+        /// </summary>
+        public int ArtefatoIdPadrao { get; set; } = 5427534;
+    }
+
     public AreaRequisitantePadraoOptions AreaRequisitantePadrao { get; set; } = new();
 
     public sealed class AreaRequisitantePadraoOptions

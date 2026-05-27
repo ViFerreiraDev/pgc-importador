@@ -64,6 +64,17 @@ public static class DependencyInjection
         services.AddHostedService<KeepAliveTokenWorker>();
         services.AddHostedService<BootstrapTokenAoIniciar>();
 
+        services.AddHttpClient<PcaImporter.Application.Consulta.IConsultaPessoaClient, PcaImporter.Infrastructure.Compras.Consulta.ConsultaPessoaClient>((sp, http) =>
+        {
+            var opcoes = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ComprasGovOptions>>().Value;
+            http.BaseAddress = new Uri(opcoes.BaseUrl);
+            http.Timeout = TimeSpan.FromSeconds(opcoes.Token.TimeoutHttpSegundos);
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("PcaImporter/1.0");
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
+        });
+
         services.AddHttpClient<IComprasGovDfdClient, ComprasGovDfdClient>((sp, http) =>
         {
             var opcoes = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ComprasGovOptions>>().Value;
