@@ -25,6 +25,12 @@ public interface IServicoListaValidacao
     Task<IReadOnlyList<RevisorDto>> RevisarItemAsync(int itemId, string login, CancellationToken ct = default);
 
     Task<IReadOnlyList<RevisorDto>> DesrevisarItemAsync(int itemId, string login, CancellationToken ct = default);
+
+    /// <summary>
+    /// Registra o desfecho de uma tentativa de importação disparada a partir deste link.
+    /// Em sucesso, marca ImportadoEm e limpa UltimoErroImportacao. Em falha, registra a mensagem.
+    /// </summary>
+    Task<LinkValidacaoDto?> RegistrarResultadoImportacaoAsync(int linkId, string idExecucao, bool sucesso, string? mensagemErro, CancellationToken ct = default);
 }
 
 public sealed class LinkJaCadastradoException : Exception

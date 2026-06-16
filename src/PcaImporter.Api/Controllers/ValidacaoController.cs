@@ -162,6 +162,30 @@ public sealed class ValidacaoController : ControllerBase
     }
 
     /// <summary>
+    /// Registra o desfecho de uma tentativa de importação. Chamado pelo frontend quando o
+    /// polling de status detecta estado terminal (Concluida/Falhou/Cancelada).
+    /// </summary>
+    [HttpPost("links/{id:int}/registrar-resultado-importacao")]
+    public async Task<ActionResult<LinkValidacaoDto>> RegistrarResultadoImportacao(
+        int id, [FromBody] RegistrarResultadoImportacaoInput corpo, CancellationToken ct)
+    {
+        if (corpo is null || string.IsNullOrWhiteSpace(corpo.IdExecucao))
+        {
+            return BadRequest(new { erro = "idExecucao obrigatório." });
+        }
+        try
+        {
+            var dto = await _servico.RegistrarResultadoImportacaoAsync(
+                id, corpo.IdExecucao, corpo.Sucesso, corpo.MensagemErro, ct);
+            return Ok(dto);
+        }
+        catch (LinkNaoEncontradoException)
+        {
+            return NotFound();
+        }
+    }
+
+    /// <summary>
     /// Dispara importação de um link da lista. Repassa pro ServicoImportacao.IniciarLinkAsync,
     /// que aplica todas as regras (duplicado, etc) e retorna o id da execução.
     /// </summary>

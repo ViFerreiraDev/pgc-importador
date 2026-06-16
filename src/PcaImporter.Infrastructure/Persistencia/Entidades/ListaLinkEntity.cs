@@ -19,6 +19,18 @@ public sealed class ListaLinkEntity
     public string? MensagemErro { get; set; }
     public DateTimeOffset? ValidadoEm { get; set; }
 
+    /// <summary>Descrição da contratação lida da aba DFD da planilha (campo "descricao").</summary>
+    public string? Descricao { get; set; }
+
+    /// <summary>Preenchido quando uma importação a partir deste link foi concluída com sucesso.</summary>
+    public DateTimeOffset? ImportadoEm { get; set; }
+
+    /// <summary>Id da última execução de importação disparada por este link.</summary>
+    public string? UltimoIdExecucao { get; set; }
+
+    /// <summary>Mensagem do erro da última tentativa de importação que falhou (nula quando a última tentativa foi sucesso).</summary>
+    public string? UltimoErroImportacao { get; set; }
+
     public DateTimeOffset CriadoEm { get; set; }
     public string? CriadoPorLogin { get; set; }
 

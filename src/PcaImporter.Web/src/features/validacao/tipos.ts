@@ -41,6 +41,10 @@ export interface LinkValidacao {
   criadoPorLogin: string | null
   excluidoEm: string | null
   excluidoPorLogin: string | null
+  descricao: string | null
+  importadoEm: string | null
+  ultimoIdExecucao: string | null
+  ultimoErroImportacao: string | null
   erros: ItemValidacao[]
   divergencias: ItemValidacao[]
   avisos: AvisoLista[]

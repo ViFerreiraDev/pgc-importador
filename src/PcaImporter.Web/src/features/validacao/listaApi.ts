@@ -100,4 +100,13 @@ export const listaApi = {
     })
     return tratar<{ id: string }>(r)
   },
+  async registrarResultadoImportacao(linkId: number, idExecucao: string, sucesso: boolean, mensagemErro?: string): Promise<LinkValidacao> {
+    const r = await fetch(`/api/lista-validacao/links/${linkId}/registrar-resultado-importacao`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idExecucao, sucesso, mensagemErro: mensagemErro ?? null }),
+    })
+    return tratar<LinkValidacao>(r)
+  },
 }

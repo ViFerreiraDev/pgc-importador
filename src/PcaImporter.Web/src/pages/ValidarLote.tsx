@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle, CheckCircle2, Eraser, ExternalLink, Loader2, ListChecks, Play,
   RotateCw, Scale, Search, Shield, Trash2, Upload, XCircle,
@@ -16,6 +16,9 @@ import {
 import { ProvedorListaValidacao, useListaValidacao } from '@/features/validacao/ListaValidacaoContext'
 import type { AusenteLote, DiffLote, DuplicadoLote, EstadoLink, GapClasse, ItemValidacao, LinkValidacao, PayloadDivergencia } from '@/features/validacao/tipos'
 import { CLASSES_PADRAO, decodificarPayload } from '@/features/validacao/tipos'
+import { importacaoApi } from '@/features/importacao/importacaoApi'
+import type { StatusImportacao } from '@/features/importacao/tipos'
+import { listaApi } from '@/features/validacao/listaApi'
 import { useAuth } from '@/features/auth/AuthContext'
 import { useToken } from '@/features/token/TokenContext'
 import { cn } from '@/lib/utils'
@@ -50,6 +53,87 @@ function Conteudo() {
   const [filtroClasse, setFiltroClasse] = useState<string>('todas')
   const [filtroBusca, setFiltroBusca] = useState<string>('')
   const [filtroSoErros, setFiltroSoErros] = useState(false)
+
+  // === Importação em andamento — bloqueia toda a UI enquanto roda + cooldown 3s ===
+  const { importar: chamarImportar } = useListaValidacao()
+  const [imp, setImp] = useState<EstadoImportacaoUi | null>(null)
+  const impLinkIdRef = useRef<number | null>(null)
+  const cooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const bloqueado = imp !== null
+
+  const iniciarImportacao = useCallback(async (link: LinkValidacao) => {
+    if (impLinkIdRef.current !== null) return
+    impLinkIdRef.current = link.id
+    setImp({ link, fase: 'enviando', status: null, erro: null, cooldownRestante: 0 })
+    try {
+      const { id } = await chamarImportar(link.id)
+      setImp((prev) => prev ? { ...prev, execucaoId: id, fase: 'executando' } : prev)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      // não temos idExecucao porque o POST inicial falhou — registra com placeholder
+      listaApi.registrarResultadoImportacao(link.id, 'envio-falhou', false, msg).catch(() => {})
+      setImp((prev) => prev ? { ...prev, fase: 'erro', erro: msg } : prev)
+    }
+  }, [chamarImportar])
+
+  // Poll de status enquanto execução está em andamento
+  useEffect(() => {
+    if (!imp || imp.fase !== 'executando' || !imp.execucaoId) return
+    let cancelado = false
+    const linkId = imp.link.id
+    const execId = imp.execucaoId
+    const tick = async () => {
+      if (cancelado) return
+      try {
+        const s = await importacaoApi.status(execId)
+        if (cancelado) return
+        const terminal = s.estado === 'Concluida' || s.estado === 'Falhou' || s.estado === 'Cancelada'
+        if (terminal) {
+          const sucesso = s.estado === 'Concluida'
+          const erroMsg = sucesso ? null : (s.ultimoErro ?? `Importação ${s.estado}`)
+          // notifica o backend pra persistir o desfecho no link
+          listaApi.registrarResultadoImportacao(linkId, execId, sucesso, erroMsg ?? undefined)
+            .catch((e) => console.warn('Falha ao registrar resultado da importação:', e))
+        }
+        setImp((prev) => prev ? {
+          ...prev,
+          status: s,
+          fase: terminal ? (s.estado === 'Concluida' ? 'cooldown' : 'erro') : 'executando',
+          erro: terminal && s.estado !== 'Concluida' ? (s.ultimoErro ?? `Importação ${s.estado}`) : prev.erro,
+        } : prev)
+      } catch (e) {
+        if (cancelado) return
+        const msg = e instanceof Error ? e.message : String(e)
+        listaApi.registrarResultadoImportacao(linkId, execId, false, msg).catch(() => {})
+        setImp((prev) => prev ? { ...prev, fase: 'erro', erro: msg } : prev)
+      }
+    }
+    void tick()
+    const interval = setInterval(tick, 700)
+    return () => { cancelado = true; clearInterval(interval) }
+  }, [imp?.fase, imp?.execucaoId])
+
+  // Cooldown 3s antes de liberar a UI
+  useEffect(() => {
+    if (!imp) return
+    if (imp.fase !== 'cooldown' && imp.fase !== 'erro') return
+    let restante = 3
+    setImp((prev) => prev ? { ...prev, cooldownRestante: restante } : prev)
+    if (cooldownRef.current) clearInterval(cooldownRef.current as unknown as number)
+    const id = setInterval(() => {
+      restante -= 1
+      if (restante <= 0) {
+        clearInterval(id)
+        impLinkIdRef.current = null
+        setImp(null)
+      } else {
+        setImp((prev) => prev ? { ...prev, cooldownRestante: restante } : prev)
+      }
+    }, 1000)
+    cooldownRef.current = id
+    return () => clearInterval(id)
+  }, [imp?.fase])
 
   async function aoCompararLote() {
     setErroExtracao(null)
@@ -170,7 +254,7 @@ function Conteudo() {
                 Cole um texto com múltiplos links — vamos comparar com a lista atual: adiciona os novos, indica os duplicados e mostra o que está faltando no texto colado.
               </CardDescription>
             </div>
-            <Button variant="outline" onClick={() => setUnitarioAberto(true)}>
+            <Button variant="outline" onClick={() => setUnitarioAberto(true)} disabled={bloqueado}>
               <ListChecks /> Adicionar 1 link
             </Button>
           </CardHeader>
@@ -203,11 +287,11 @@ function Conteudo() {
               </Alert>
             )}
             <div className="flex gap-2">
-              <Button onClick={() => void aoCompararLote()} disabled={extraindo || !texto.trim()}>
+              <Button onClick={() => void aoCompararLote()} disabled={extraindo || !texto.trim() || bloqueado}>
                 {extraindo ? <Loader2 className="animate-spin" /> : <Search />}
                 {extraindo ? 'Comparando…' : 'Comparar lote com a lista'}
               </Button>
-              <Button variant="ghost" onClick={() => { setTexto(''); setDiffRecente(null) }} disabled={extraindo || (!texto && !diffRecente)}>
+              <Button variant="ghost" onClick={() => { setTexto(''); setDiffRecente(null) }} disabled={extraindo || (!texto && !diffRecente) || bloqueado}>
                 <Eraser /> Limpar
               </Button>
             </div>
@@ -284,12 +368,12 @@ function Conteudo() {
             {aba === 'ativos' && (
               <>
                 {todosErros.length > 0 && !validandoTodos && (
-                  <Button variant="outline" onClick={() => setModalGlobal('erros')}>
+                  <Button variant="outline" onClick={() => setModalGlobal('erros')} disabled={bloqueado}>
                     <XCircle className="text-[hsl(var(--error-500))]" /> Erros ({todosErros.length})
                   </Button>
                 )}
                 {todasDivergencias.length > 0 && !validandoTodos && (
-                  <Button variant="outline" onClick={() => setModalGlobal('divergencias')}>
+                  <Button variant="outline" onClick={() => setModalGlobal('divergencias')} disabled={bloqueado}>
                     <Scale className="text-[hsl(20_85%_45%)]" /> Divergências ({todasDivergencias.length})
                   </Button>
                 )}
@@ -298,14 +382,14 @@ function Conteudo() {
                     <select
                       value={modoValidar}
                       onChange={(e) => setModoValidar(e.target.value as 'pendentes' | 'validos' | 'todos')}
-                      disabled={validandoTodos}
+                      disabled={validandoTodos || bloqueado}
                       className="h-9 px-2 text-[13px] border border-input rounded-md bg-surface"
                     >
                       <option value="pendentes">Só pendentes/erros</option>
                       <option value="validos">Só os já validados</option>
                       <option value="todos">Re-validar todos</option>
                     </select>
-                    <Button onClick={() => void aoValidarTodos(modoValidar)} disabled={validandoTodos}>
+                    <Button onClick={() => void aoValidarTodos(modoValidar)} disabled={validandoTodos || bloqueado}>
                       {validandoTodos ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
                       {validandoTodos
                         ? `Validando ${progresso.feitos}/${progresso.total}…`
@@ -399,7 +483,8 @@ function Conteudo() {
                 <tr className="text-left">
                   <Th className="w-[90px]">Status</Th>
                   <Th className="w-[150px]">Rótulo</Th>
-                  <Th className="w-[260px]">Link</Th>
+                  <Th className="w-[180px]">Descrição</Th>
+                  <Th className="w-[240px]">Link</Th>
                   <Th className="w-[80px] text-right">Materiais</Th>
                   <Th className="w-[90px] text-right">Diverg.</Th>
                   <Th className="w-[60px] text-right">Erros</Th>
@@ -417,6 +502,9 @@ function Conteudo() {
                     sessaoCompras={sessaoCompras}
                     onDetalhes={setDetalhes}
                     gaps={gaps}
+                    bloqueado={bloqueado}
+                    onImportar={(l) => void iniciarImportacao(l)}
+                    linkSendoImportado={imp?.link.id ?? null}
                   />
                 ))}
               </tbody>
@@ -448,9 +536,145 @@ function Conteudo() {
         onFechar={() => setModalGlobal(null)}
       />
 
-      <DialogConfirmarImportar />
+      <DialogProgressoImportacao imp={imp} />
     </div>
   )
+}
+
+function DialogProgressoImportacao({ imp }: { imp: EstadoImportacaoUi | null }) {
+  if (!imp) return null
+  const s = imp.status
+  const totalEtapas = s?.totalEtapas ?? 0
+  const feitas = s?.etapasConcluidas ?? 0
+  const pct = totalEtapas > 0 ? Math.min(100, Math.round((feitas / totalEtapas) * 100)) : (
+    imp.fase === 'enviando' ? 5 : imp.fase === 'cooldown' ? 100 : 0
+  )
+
+  const titulo =
+    imp.fase === 'enviando' ? 'Enviando para o Compras…'
+    : imp.fase === 'executando' ? 'Importando para o PGC…'
+    : imp.fase === 'cooldown' ? 'Importação concluída'
+    : 'Importação falhou'
+
+  const eventosVisiveis = s?.eventos ?? []
+
+  return (
+    <Dialog open={true} onOpenChange={() => { /* não fecha clicando fora */ }}>
+      <DialogContent className="sm:max-w-[640px] gap-3">
+        <DialogHeader>
+          <div className={cn(
+            'flex size-10 items-center justify-center rounded-[10px] mb-1',
+            imp.fase === 'cooldown' ? 'bg-[hsl(var(--success-50))] text-[hsl(var(--success-600))]'
+            : imp.fase === 'erro' ? 'bg-[hsl(var(--error-50))] text-[hsl(var(--error-500))]'
+            : 'bg-[hsl(var(--brand-50))] text-[hsl(var(--brand-600))]')}>
+            {imp.fase === 'cooldown' ? <CheckCircle2 className="size-5" />
+              : imp.fase === 'erro' ? <XCircle className="size-5" />
+              : <Loader2 className="size-5 animate-spin" />}
+          </div>
+          <DialogTitle>{titulo}</DialogTitle>
+          <DialogDescription>
+            <span className="font-medium text-foreground">{imp.link.rotulo ?? imp.link.idPlanilha}</span>
+            {imp.link.classe && <> · {imp.link.classe}</>}
+            {imp.link.numeroGrupo != null && <> · Grupo {imp.link.numeroGrupo}</>}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-2">
+          <div className="h-2 rounded-full bg-[hsl(var(--neutral-100))] overflow-hidden">
+            <div
+              className={cn('h-full transition-all',
+                imp.fase === 'cooldown' ? 'bg-[hsl(var(--success-500))]'
+                : imp.fase === 'erro' ? 'bg-[hsl(var(--error-500))]'
+                : 'bg-[hsl(var(--brand-500))]')}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <div className="flex justify-between text-[11.5px] text-muted-foreground tabular-nums">
+            <span>
+              {s?.etapaAtual ?? (imp.fase === 'enviando' ? 'Preparando envio…' : '—')}
+            </span>
+            <span>
+              {totalEtapas > 0 ? `${feitas}/${totalEtapas} etapas` : ''}
+              {totalEtapas > 0 ? ' · ' : ''}{pct}%
+            </span>
+          </div>
+        </div>
+
+        {s && (s.totalMateriais > 0 || s.materiaisAdicionados > 0) && (
+          <div className="text-[12px] text-muted-foreground">
+            Materiais: <strong className="text-foreground tabular-nums">{s.materiaisAdicionados}</strong>
+            {s.totalMateriais > 0 && <> / {s.totalMateriais}</>}
+            {s.numeroDfd != null && <> · DFD {s.numeroDfd}/{s.anoDfd}</>}
+          </div>
+        )}
+
+        {eventosVisiveis.length > 0 && (
+          <div className="bg-[hsl(var(--neutral-25))] border border-border rounded-md max-h-[260px] overflow-y-auto">
+            <div className="sticky top-0 bg-[hsl(var(--neutral-50))] border-b border-border px-2.5 py-1 text-[10.5px] uppercase tracking-[0.05em] font-semibold text-muted-foreground flex justify-between">
+              <span>Eventos da execução</span>
+              <span className="tabular-nums">{eventosVisiveis.length}</span>
+            </div>
+            <ul className="divide-y divide-[hsl(var(--neutral-100))]">
+              {eventosVisiveis.map((e, i) => {
+                const eErro = (e.tipo ?? '').toLowerCase().includes('erro') || (e.tipo ?? '').toLowerCase() === 'falha'
+                return (
+                  <li key={i} className="text-[11.5px] flex gap-2 px-2.5 py-1.5">
+                    <span className="font-mono text-muted-foreground shrink-0 w-[64px] tabular-nums">
+                      {new Date(e.ocorridoEm).toLocaleTimeString('pt-BR')}
+                    </span>
+                    {e.tipo && (
+                      <span className={cn(
+                        'inline-flex items-center px-1.5 rounded-sm shrink-0 text-[9.5px] uppercase tracking-[0.04em] font-semibold',
+                        eErro
+                          ? 'bg-[hsl(var(--error-50))] text-[hsl(var(--error-700))]'
+                          : 'bg-[hsl(var(--neutral-100))] text-[hsl(var(--neutral-700))]'
+                      )}>
+                        {e.tipo}
+                      </span>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className={cn(eErro && 'text-[hsl(var(--error-700))] font-medium')}>{e.mensagem}</div>
+                      {e.detalhe && (
+                        <div className="text-[10.5px] text-muted-foreground font-mono break-all mt-0.5">{e.detalhe}</div>
+                      )}
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        )}
+
+        {imp.erro && (
+          <Alert variant="destructive">
+            <AlertTriangle />
+            <AlertDescription>{imp.erro}</AlertDescription>
+          </Alert>
+        )}
+
+        <div className="text-[12px] text-muted-foreground text-center">
+          {imp.fase === 'enviando' && 'Enviando requisição ao backend…'}
+          {imp.fase === 'executando' && 'Processando no PGC. Não saia desta página.'}
+          {(imp.fase === 'cooldown' || imp.fase === 'erro') && imp.cooldownRestante > 0 && (
+            <>Aguardando <strong className="text-foreground tabular-nums">{imp.cooldownRestante}s</strong> antes de liberar (evitar sobrecarga no Compras)…</>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ============================================================================
+//  Tipos auxiliares
+// ============================================================================
+
+interface EstadoImportacaoUi {
+  link: LinkValidacao
+  execucaoId?: string
+  status: StatusImportacao | null
+  fase: 'enviando' | 'executando' | 'cooldown' | 'erro'
+  erro: string | null
+  cooldownRestante: number
 }
 
 // ============================================================================
@@ -487,7 +711,7 @@ function agruparPorClasse(links: LinkValidacao[]): Array<[string | null, LinkVal
 }
 
 function FragmentoClasse({
-  classe, links, aba, ehAdmin, sessaoCompras, onDetalhes, gaps,
+  classe, links, aba, ehAdmin, sessaoCompras, onDetalhes, gaps, bloqueado, onImportar, linkSendoImportado,
 }: {
   classe: string | null
   links: LinkValidacao[]
@@ -496,12 +720,15 @@ function FragmentoClasse({
   sessaoCompras: boolean
   onDetalhes: (l: LinkValidacao) => void
   gaps: GapClasse[]
+  bloqueado: boolean
+  onImportar: (l: LinkValidacao) => void
+  linkSendoImportado: number | null
 }) {
   const gap = classe ? gaps.find((g) => g.classe.toUpperCase() === classe) : null
   return (
     <>
       <tr>
-        <td colSpan={7} className="bg-[hsl(var(--neutral-50))] border-y border-border px-3.5 py-1.5">
+        <td colSpan={8} className="bg-[hsl(var(--neutral-50))] border-y border-border px-3.5 py-1.5">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[11px] uppercase tracking-[0.06em] font-semibold text-[hsl(var(--neutral-700))]">
               {classe ?? 'Sem classe'}
@@ -523,6 +750,9 @@ function FragmentoClasse({
           ehAdmin={ehAdmin}
           sessaoCompras={sessaoCompras}
           onDetalhes={() => onDetalhes(l)}
+          bloqueado={bloqueado}
+          onImportar={() => onImportar(l)}
+          sendoImportado={linkSendoImportado === l.id}
         />
       ))}
     </>
@@ -534,15 +764,18 @@ function FragmentoClasse({
 // ============================================================================
 
 function LinhaLink({
-  link, aba, ehAdmin, sessaoCompras, onDetalhes,
+  link, aba, ehAdmin, sessaoCompras, onDetalhes, bloqueado, onImportar, sendoImportado,
 }: {
   link: LinkValidacao
   aba: 'ativos' | 'lixeira'
   ehAdmin: boolean
   sessaoCompras: boolean
   onDetalhes: () => void
+  bloqueado: boolean
+  onImportar: () => void
+  sendoImportado: boolean
 }) {
-  const { validar, excluir, restaurar, apagarDefinitivamente, importar } = useListaValidacao()
+  const { validar, excluir, restaurar, apagarDefinitivamente } = useListaValidacao()
   const [agindo, setAgindo] = useState<string | null>(null)
   const [erroAcao, setErroAcao] = useState<string | null>(null)
 
@@ -553,7 +786,7 @@ function LinhaLink({
     finally { setAgindo(null) }
   }
 
-  const podeImportar = link.estado === 'valido' && sessaoCompras
+  const podeImportar = link.estado === 'valido' && sessaoCompras && !bloqueado
   const totalRevisaveis = link.erros.length + link.divergencias.length
   const totalRevisados = link.erros.filter((i) => i.revisores.length > 0).length
     + link.divergencias.filter((i) => i.revisores.length > 0).length
@@ -561,7 +794,23 @@ function LinhaLink({
 
   return (
     <tr className="border-b border-[hsl(var(--neutral-100))] last:border-b-0">
-      <Td><StatusBadge estado={link.estado} /></Td>
+      <Td>
+        <StatusBadge estado={link.estado} />
+        {link.importadoEm && (
+          <div className="mt-1">
+            <Badge variant="success" className="text-[10px]" comDot title={`Importado em ${new Date(link.importadoEm).toLocaleString('pt-BR')}`}>
+              importado
+            </Badge>
+          </div>
+        )}
+        {!link.importadoEm && link.ultimoErroImportacao && (
+          <div className="mt-1">
+            <Badge variant="destructive" className="text-[10px]" comDot title={link.ultimoErroImportacao}>
+              falhou
+            </Badge>
+          </div>
+        )}
+      </Td>
       <Td>
         <div className="font-medium truncate max-w-[140px]" title={link.rotulo ?? undefined}>
           {link.rotulo ?? <span className="text-muted-foreground">—</span>}
@@ -571,11 +820,14 @@ function LinhaLink({
         )}
       </Td>
       <Td>
+        <DescricaoCelula descricao={link.descricao} />
+      </Td>
+      <Td>
         <a
           href={link.url}
           target="_blank"
           rel="noreferrer"
-          className="text-[11.5px] text-muted-foreground hover:text-[hsl(var(--brand-600))] inline-flex items-center gap-1 max-w-[260px]"
+          className="text-[11.5px] text-muted-foreground hover:text-[hsl(var(--brand-600))] inline-flex items-center gap-1 max-w-[240px]"
           title={link.url}
         >
           <ExternalLink className="size-3 shrink-0 opacity-60" />
@@ -583,6 +835,11 @@ function LinhaLink({
         </a>
         {erroAcao && (
           <div className="text-[11px] text-[hsl(var(--error-700))] mt-0.5">{erroAcao}</div>
+        )}
+        {!link.importadoEm && link.ultimoErroImportacao && (
+          <div className="text-[10.5px] text-[hsl(var(--error-600))] mt-0.5 truncate max-w-[240px]" title={link.ultimoErroImportacao}>
+            <strong>último erro de importação:</strong> {link.ultimoErroImportacao}
+          </div>
         )}
       </Td>
       <Td className="text-right font-mono tabular-nums">
@@ -603,26 +860,27 @@ function LinhaLink({
           )}
           {aba === 'ativos' ? (
             <>
-              <Button variant="ghost" size="xs" onClick={() => void correr('validar', () => validar(link.id))} disabled={agindo !== null} title="Re-validar">
+              <Button variant="ghost" size="xs" onClick={() => void correr('validar', () => validar(link.id))} disabled={agindo !== null || bloqueado} title={bloqueado ? 'Aguarde a importação em andamento' : 'Re-validar'}>
                 {agindo === 'validar' ? <Loader2 className="animate-spin" /> : <RotateCw />}
               </Button>
-              <Button variant="ghost" size="xs" onClick={onDetalhes} disabled={totalRevisaveis === 0 && link.estado !== 'erro'}>
+              <Button variant="ghost" size="xs" onClick={onDetalhes} disabled={(totalRevisaveis === 0 && link.estado !== 'erro') || bloqueado}>
                 Detalhes
               </Button>
               <Button
                 variant={podeImportar ? 'primary' : 'ghost'}
                 size="xs"
-                onClick={() => void correr('importar', async () => {
-                  const { id } = await importar(link.id)
-                  window.location.href = `/importar?execucao=${id}`
-                })}
+                onClick={onImportar}
                 disabled={!podeImportar || agindo !== null}
-                title={!sessaoCompras ? 'Conecte a sessão Compras para importar' : link.estado !== 'valido' ? 'Valide com sucesso antes de importar' : 'Importar agora'}
+                title={bloqueado
+                  ? (sendoImportado ? 'Importação deste link em andamento' : 'Aguarde a importação em andamento')
+                  : !sessaoCompras ? 'Conecte a sessão Compras para importar'
+                  : link.estado !== 'valido' ? 'Valide com sucesso antes de importar'
+                  : 'Importar agora'}
               >
-                {agindo === 'importar' ? <Loader2 className="animate-spin" /> : <Play />}
+                {sendoImportado ? <Loader2 className="animate-spin" /> : <Play />}
                 Importar
               </Button>
-              <Button variant="ghost" size="xs" onClick={() => void correr('excluir', () => excluir(link.id))} disabled={agindo !== null} title="Excluir (vai pra lixeira)">
+              <Button variant="ghost" size="xs" onClick={() => void correr('excluir', () => excluir(link.id))} disabled={agindo !== null || bloqueado} title={bloqueado ? 'Aguarde a importação em andamento' : 'Excluir (vai pra lixeira)'}>
                 {agindo === 'excluir' ? <Loader2 className="animate-spin" /> : <Trash2 className="text-[hsl(var(--error-500))]" />}
               </Button>
             </>
@@ -630,10 +888,10 @@ function LinhaLink({
             <>
               {ehAdmin ? (
                 <>
-                  <Button variant="ghost" size="xs" onClick={() => void correr('restaurar', () => restaurar(link.id))} disabled={agindo !== null}>
+                  <Button variant="ghost" size="xs" onClick={() => void correr('restaurar', () => restaurar(link.id))} disabled={agindo !== null || bloqueado}>
                     {agindo === 'restaurar' ? <Loader2 className="animate-spin" /> : <Upload className="rotate-180" />} Restaurar
                   </Button>
-                  <Button variant="ghost" size="xs" onClick={() => void correr('apagar', () => apagarDefinitivamente(link.id))} disabled={agindo !== null}>
+                  <Button variant="ghost" size="xs" onClick={() => void correr('apagar', () => apagarDefinitivamente(link.id))} disabled={agindo !== null || bloqueado}>
                     {agindo === 'apagar' ? <Loader2 className="animate-spin" /> : <Eraser className="text-[hsl(var(--error-500))]" />} Apagar
                   </Button>
                 </>
@@ -1217,6 +1475,27 @@ function LinhaDivGlobal({
 //  Componentes auxiliares
 // ============================================================================
 
+/**
+ * Mostra a descrição da DFD truncada — mantém os primeiros 2 "grupos" (palavras)
+ * mais um pouco do contexto, com a versão integral no tooltip nativo.
+ */
+function DescricaoCelula({ descricao }: { descricao: string | null }) {
+  if (!descricao || !descricao.trim()) {
+    return <span className="text-[11px] text-muted-foreground">—</span>
+  }
+  const palavras = descricao.trim().split(/\s+/)
+  // pelo menos 2 grupos de palavras (~4 palavras), respeitando largura
+  const preview = palavras.slice(0, 4).join(' ')
+  const truncado = palavras.length > 4
+  return (
+    <div className="max-w-[180px]" title={descricao}>
+      <div className="text-[12px] leading-[1.3] line-clamp-2 break-words">
+        {preview}{truncado && '…'}
+      </div>
+    </div>
+  )
+}
+
 function StatusBadge({ estado }: { estado: EstadoLink }) {
   if (estado === 'pendente') return <Badge variant="muted">pendente</Badge>
   if (estado === 'validando') return (
@@ -1244,11 +1523,6 @@ function ThSmallLaranja({ children, className }: { children: React.ReactNode; cl
 
 const brl = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const num = (v: number) => v.toLocaleString('pt-BR', { maximumFractionDigits: 2 })
-
-// Placeholder pra confirmação de importação duplicada (futuro: integra com /confirmarDuplicado)
-function DialogConfirmarImportar() {
-  return null
-}
 
 // ============================================================================
 //  Resumo do diff (comparar lote)

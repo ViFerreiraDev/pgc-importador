@@ -28,6 +28,10 @@ public sealed record LinkValidacaoDto(
     string? CriadoPorLogin,
     DateTimeOffset? ExcluidoEm,
     string? ExcluidoPorLogin,
+    string? Descricao,
+    DateTimeOffset? ImportadoEm,
+    string? UltimoIdExecucao,
+    string? UltimoErroImportacao,
     IReadOnlyList<ItemValidacaoDto> Erros,
     IReadOnlyList<ItemValidacaoDto> Divergencias,
     IReadOnlyList<AvisoListaDto> Avisos
@@ -65,6 +69,12 @@ public sealed record AdicionarLinkInput(
     string? Rotulo,
     string? Classe = null,
     int? NumeroGrupo = null
+);
+
+public sealed record RegistrarResultadoImportacaoInput(
+    string IdExecucao,
+    bool Sucesso,
+    string? MensagemErro = null
 );
 
 public sealed record ExtrairLinksInput(

@@ -323,6 +323,11 @@ public sealed class ServicoListaValidacao : IServicoListaValidacao
             await using var stream = await GoogleSheetsHelper.BaixarComoXlsxAsync(http, link.Url, ct).ConfigureAwait(false);
 
             var (entrada, errosLeitura) = LeitorPlanilhaDfd.Ler(stream);
+            // Mesmo com erros de validação, se a leitura captou a descrição, preserva.
+            if (entrada is not null && !string.IsNullOrWhiteSpace(entrada.Descricao))
+            {
+                link.Descricao = entrada.Descricao.Trim();
+            }
             if (entrada is null || errosLeitura.Count > 0)
             {
                 // Erros de leitura — não roda divergências.
@@ -572,6 +577,38 @@ public sealed class ServicoListaValidacao : IServicoListaValidacao
         return revisores;
     }
 
+    public async Task<LinkValidacaoDto?> RegistrarResultadoImportacaoAsync(
+        int linkId, string idExecucao, bool sucesso, string? mensagemErro, CancellationToken ct = default)
+    {
+        await using var ctx = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var link = await ctx.ListaLinks
+            .Include(l => l.Itens).ThenInclude(i => i.Revisoes)
+            .FirstOrDefaultAsync(l => l.Id == linkId, ct).ConfigureAwait(false);
+        if (link is null) throw new LinkNaoEncontradoException(linkId);
+
+        link.UltimoIdExecucao = string.IsNullOrWhiteSpace(idExecucao) ? null : idExecucao;
+        if (sucesso)
+        {
+            link.ImportadoEm = DateTimeOffset.UtcNow;
+            link.UltimoErroImportacao = null;
+            _logs.Registrar(NivelLog.Sucesso, "ListaValidacao",
+                $"Importação concluída · {link.Rotulo ?? link.IdPlanilha}",
+                detalhes: $"execucao={idExecucao}");
+        }
+        else
+        {
+            link.UltimoErroImportacao = string.IsNullOrWhiteSpace(mensagemErro) ? "Falha desconhecida." : mensagemErro;
+            _logs.Registrar(NivelLog.Erro, "ListaValidacao",
+                $"Falha ao importar · {link.Rotulo ?? link.IdPlanilha}",
+                detalhes: $"execucao={idExecucao} · {link.UltimoErroImportacao}");
+        }
+        await ctx.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        var dto = MapearLink(link);
+        await _eventos.LinkAtualizadoAsync(dto).ConfigureAwait(false);
+        return dto;
+    }
+
     private static async Task<IReadOnlyList<RevisorDto>> CarregarRevisoresAsync(PcaDbContext ctx, int itemId, CancellationToken ct)
     {
         var lista = await ctx.ListaItemRevisoes
@@ -602,6 +639,10 @@ public sealed class ServicoListaValidacao : IServicoListaValidacao
             CriadoPorLogin: l.CriadoPorLogin,
             ExcluidoEm: l.ExcluidoEm,
             ExcluidoPorLogin: l.ExcluidoPorLogin,
+            Descricao: l.Descricao,
+            ImportadoEm: l.ImportadoEm,
+            UltimoIdExecucao: l.UltimoIdExecucao,
+            UltimoErroImportacao: l.UltimoErroImportacao,
             Erros: erros,
             Divergencias: divergencias,
             Avisos: Array.Empty<AvisoListaDto>()
