@@ -18,7 +18,7 @@ import type { AusenteLote, DiffLote, DuplicadoLote, EstadoLink, GapClasse, ItemV
 import { CLASSES_PADRAO, decodificarPayload } from '@/features/validacao/tipos'
 import { importacaoApi } from '@/features/importacao/importacaoApi'
 import type { StatusImportacao } from '@/features/importacao/tipos'
-import { listaApi } from '@/features/validacao/listaApi'
+import { listaApi, SemSessaoError } from '@/features/validacao/listaApi'
 import { useAuth } from '@/features/auth/AuthContext'
 import { useToken } from '@/features/token/TokenContext'
 import { cn } from '@/lib/utils'
@@ -71,8 +71,12 @@ function Conteudo() {
       setImp((prev) => prev ? { ...prev, execucaoId: id, fase: 'executando' } : prev)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      // não temos idExecucao porque o POST inicial falhou — registra com placeholder
-      listaApi.registrarResultadoImportacao(link.id, 'envio-falhou', false, msg).catch(() => {})
+      // Sem sessão no Compras não é falha da planilha: mostra o aviso sem
+      // registrar desfecho de importação no link.
+      if (!(e instanceof SemSessaoError)) {
+        // não temos idExecucao porque o POST inicial falhou — registra com placeholder
+        listaApi.registrarResultadoImportacao(link.id, 'envio-falhou', false, msg).catch(() => {})
+      }
       setImp((prev) => prev ? { ...prev, fase: 'erro', erro: msg } : prev)
     }
   }, [chamarImportar])
@@ -786,7 +790,9 @@ function LinhaLink({
     finally { setAgindo(null) }
   }
 
-  const podeImportar = link.estado === 'valido' && sessaoCompras && !bloqueado
+  // Sessão do Compras NÃO bloqueia o clique: se estiver deslogado, o backend
+  // recusa com mensagem clara ("não está logado no Compras.gov") exibida na UI.
+  const podeImportar = link.estado === 'valido' && !bloqueado
   const totalRevisaveis = link.erros.length + link.divergencias.length
   const totalRevisados = link.erros.filter((i) => i.revisores.length > 0).length
     + link.divergencias.filter((i) => i.revisores.length > 0).length
@@ -873,8 +879,8 @@ function LinhaLink({
                 disabled={!podeImportar || agindo !== null}
                 title={bloqueado
                   ? (sendoImportado ? 'Importação deste link em andamento' : 'Aguarde a importação em andamento')
-                  : !sessaoCompras ? 'Conecte a sessão Compras para importar'
                   : link.estado !== 'valido' ? 'Valide com sucesso antes de importar'
+                  : !sessaoCompras ? 'Atenção: sem sessão no Compras.gov — a importação será recusada'
                   : 'Importar agora'}
               >
                 {sendoImportado ? <Loader2 className="animate-spin" /> : <Play />}

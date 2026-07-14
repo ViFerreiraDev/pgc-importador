@@ -14,8 +14,14 @@ export class ImportacaoDuplicadaError extends Error {
   }
 }
 
+/** Backend recusou a importação porque não há sessão ativa no Compras.gov. */
+export class SemSessaoError extends Error {}
+
 async function tratarResposta<T>(r: Response): Promise<T> {
   const data = await r.json()
+  if (r.status === 409 && data?.semSessao === true) {
+    throw new SemSessaoError(data.erro ?? 'O sistema não está logado no Compras.gov.')
+  }
   if (r.status === 409 && data?.duplicado === true) {
     throw new ImportacaoDuplicadaError(data.erro ?? 'Planilha já importada', data.anterior)
   }

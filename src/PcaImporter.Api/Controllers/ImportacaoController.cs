@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using PcaImporter.Application.Importacao;
+using PcaImporter.Application.Token;
 
 namespace PcaImporter.Api.Controllers;
 
@@ -45,6 +46,10 @@ public sealed class ImportacaoController : ControllerBase
         {
             var id = await _servico.IniciarAsync(stream, ct);
             return Ok(new { id });
+        }
+        catch (TokenIndisponivelException ex)
+        {
+            return Conflict(new { erro = ex.Message, semSessao = true });
         }
         catch (InvalidOperationException ex)
         {
@@ -93,6 +98,10 @@ public sealed class ImportacaoController : ControllerBase
         {
             var id = await _servico.IniciarLinkAsync(corpo.Url.Trim(), corpo.ConfirmarDuplicado, User.Identity?.Name, ct);
             return Ok(new { id });
+        }
+        catch (TokenIndisponivelException ex)
+        {
+            return Conflict(new { erro = ex.Message, semSessao = true });
         }
         catch (ImportacaoDuplicadaException ex)
         {

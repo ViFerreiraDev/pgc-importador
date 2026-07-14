@@ -1,7 +1,13 @@
 import type { DiffLote, LinkValidacao, ListaValidacao, Revisor } from './tipos'
 
+/** Backend recusou a importação porque não há sessão ativa no Compras.gov. */
+export class SemSessaoError extends Error {}
+
 async function tratar<T>(r: Response): Promise<T> {
   const data = await r.json().catch(() => ({}))
+  if (r.status === 409 && data?.semSessao === true) {
+    throw new SemSessaoError(data.erro ?? 'O sistema não está logado no Compras.gov.')
+  }
   if (!r.ok) {
     throw new Error((data && (data.erro || data.title)) ?? `HTTP ${r.status}`)
   }

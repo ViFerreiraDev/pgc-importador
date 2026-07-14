@@ -4,6 +4,8 @@ using PcaImporter.Application.Compras.Catalogo;
 using PcaImporter.Application.Compras.Dfd;
 using PcaImporter.Application.Importacao;
 using PcaImporter.Application.Logs;
+using PcaImporter.Application.Token;
+using PcaImporter.Domain.Token;
 using System.Net.Http;
 
 namespace PcaImporter.Infrastructure.Importacao;
@@ -19,6 +21,7 @@ public sealed class ServicoImportacao : IServicoImportacao
     private readonly IHttpClientFactory _httpFactory;
     private readonly IRepositorioHistoricoImportacao _historico;
     private readonly IRepositorioPrecosReferencia _precosRef;
+    private readonly IGerenciadorTokenSessao _tokens;
     private readonly ILogger<ServicoImportacao> _log;
 
     // Mapa idExecucao -> contexto de origem (link + usuario), pra registrar histórico ao concluir.
@@ -35,6 +38,7 @@ public sealed class ServicoImportacao : IServicoImportacao
         IHttpClientFactory httpFactory,
         IRepositorioHistoricoImportacao historico,
         IRepositorioPrecosReferencia precosRef,
+        IGerenciadorTokenSessao tokens,
         ILogger<ServicoImportacao> log)
     {
         _dfd = dfd;
@@ -46,7 +50,34 @@ public sealed class ServicoImportacao : IServicoImportacao
         _httpFactory = httpFactory;
         _historico = historico;
         _precosRef = precosRef;
+        _tokens = tokens;
         _log = log;
+    }
+
+    /// <summary>
+    /// Garante que há sessão utilizável no Compras.gov antes de disparar uma importação.
+    /// Validação de planilha NÃO passa por aqui — continua livre sem sessão.
+    /// Se o token expirou mas há refresh, tenta recuperar antes de recusar.
+    /// </summary>
+    private async Task GarantirSessaoAsync(CancellationToken ct)
+    {
+        const string msgSemSessao =
+            "O sistema não está logado no Compras.gov. Informe um novo token na tela de Sessão para importar.";
+
+        var st = _tokens.ObterStatus();
+        if (st.Estado == EstadoToken.Ausente)
+        {
+            throw new TokenIndisponivelException(msgSemSessao);
+        }
+
+        if ((st.SegundosRestantes ?? 0) <= 0)
+        {
+            st = await _tokens.ForcarRefreshAsync(ct).ConfigureAwait(false);
+            if (st.Estado == EstadoToken.Ausente || (st.SegundosRestantes ?? 0) <= 0)
+            {
+                throw new TokenIndisponivelException(msgSemSessao);
+            }
+        }
     }
 
     public StatusImportacao? ObterStatus(string id) => _registroImp.Obter(id);
@@ -103,6 +134,8 @@ public sealed class ServicoImportacao : IServicoImportacao
 
     public async Task<string> IniciarLinkAsync(string url, bool confirmarDuplicado, string? usuarioLogin, CancellationToken ct = default)
     {
+        await GarantirSessaoAsync(ct).ConfigureAwait(false);
+
         if (!GoogleSheetsHelper.TentarExtrairId(url, out var idPlanilha))
         {
             throw new InvalidOperationException(
@@ -135,6 +168,8 @@ public sealed class ServicoImportacao : IServicoImportacao
 
     public async Task<string> IniciarAsync(Stream xlsx, CancellationToken ct = default)
     {
+        await GarantirSessaoAsync(ct).ConfigureAwait(false);
+
         var resultado = await ValidarAsync(xlsx, ct).ConfigureAwait(false);
         if (!resultado.Valido || resultado.Entrada is null)
         {

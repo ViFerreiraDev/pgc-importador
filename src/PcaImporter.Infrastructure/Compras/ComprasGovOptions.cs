@@ -51,6 +51,18 @@ public sealed class ComprasGovOptions
 
         public int TimeoutHttpSegundos { get; set; } = 30;
 
+        /// <summary>
+        /// Timeout específico da chamada de retoken. Menor que o timeout geral
+        /// para caber múltiplas tentativas dentro da janela de validade do token.
+        /// </summary>
+        public int TimeoutRetokenSegundos { get; set; } = 10;
+
+        /// <summary>
+        /// Tentativas de refresh por ciclo em falhas transitórias (rede/timeout/5xx).
+        /// Rejeição definitiva (401/403) não é retentada.
+        /// </summary>
+        public int TentativasRefresh { get; set; } = 3;
+
         public int BackoffMinimoSegundos { get; set; } = 5;
 
         public int BackoffMaximoSegundos { get; set; } = 60;

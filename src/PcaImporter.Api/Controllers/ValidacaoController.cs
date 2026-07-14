@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PcaImporter.Application.Importacao;
+using PcaImporter.Application.Token;
 using PcaImporter.Application.Validacao;
 
 namespace PcaImporter.Api.Controllers;
@@ -200,6 +201,10 @@ public sealed class ValidacaoController : ControllerBase
         {
             var idExec = await _importacao.IniciarLinkAsync(link.Url, confirmarDuplicado, User.Identity?.Name, ct);
             return Ok(new { id = idExec });
+        }
+        catch (TokenIndisponivelException ex)
+        {
+            return Conflict(new { erro = ex.Message, semSessao = true });
         }
         catch (ImportacaoDuplicadaException ex)
         {

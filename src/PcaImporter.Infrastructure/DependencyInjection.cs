@@ -55,7 +55,9 @@ public static class DependencyInjection
         {
             var opcoes = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ComprasGovOptions>>().Value;
             http.BaseAddress = new Uri(opcoes.BaseUrl);
-            http.Timeout = TimeSpan.FromSeconds(opcoes.Token.TimeoutHttpSegundos);
+            // Timeout curto: o retoken é retentado com backoff, então cada tentativa
+            // precisa falhar rápido pra caber na janela de validade do token.
+            http.Timeout = TimeSpan.FromSeconds(opcoes.Token.TimeoutRetokenSegundos);
         });
 
         services.AddSingleton<GerenciadorTokenSessao>();

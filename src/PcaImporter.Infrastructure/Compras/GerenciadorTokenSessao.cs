@@ -200,48 +200,88 @@ public sealed class GerenciadorTokenSessao : IGerenciadorTokenSessao, IDisposabl
             return false;
         }
 
-        var resp = await _client.RefreshAsync(_atual.RefreshToken, ct).ConfigureAwait(false);
-        _ultimoRefreshEm = _tempo.GetUtcNow();
+        var tentativas = Math.Max(1, _opcoes.Token.TentativasRefresh);
+        RespostaRefreshToken? resp = null;
 
-        if (resp.Sucesso && !string.IsNullOrWhiteSpace(resp.NovoAccessToken))
+        for (var tentativa = 1; tentativa <= tentativas; tentativa++)
         {
-            try
+            resp = await _client.RefreshAsync(_atual.RefreshToken, ct).ConfigureAwait(false);
+            _ultimoRefreshEm = _tempo.GetUtcNow();
+
+            if (resp.Sucesso && !string.IsNullOrWhiteSpace(resp.NovoAccessToken))
             {
-                var refreshFinal = !string.IsNullOrWhiteSpace(resp.NovoRefreshToken)
-                    ? resp.NovoRefreshToken
-                    : _atual.RefreshToken;
-
-                var novo = JwtDecoder.Decodificar(resp.NovoAccessToken, refreshFinal);
-                _atual = novo;
-                _ultimoErro = null;
-                _log.LogInformation("Refresh OK. Novo exp: {Exp}. RefreshTokenRotacionado={Rot}",
-                    novo.ExpiraEm, !string.IsNullOrWhiteSpace(resp.NovoRefreshToken));
-
-                _logsApp.Registrar(NivelLog.Info, "Token", "Token renovado", $"novo expira={novo.ExpiraEm:HH:mm:ss}");
-
-                if (!string.IsNullOrWhiteSpace(novo.RefreshToken))
+                try
                 {
-                    try { await _repo.SalvarRefreshAsync(novo.RefreshToken, ct).ConfigureAwait(false); }
-                    catch (Exception ex) { _log.LogError(ex, "Falha ao persistir refresh apos rotacao"); }
-                }
+                    var refreshFinal = !string.IsNullOrWhiteSpace(resp.NovoRefreshToken)
+                        ? resp.NovoRefreshToken
+                        : _atual.RefreshToken;
 
-                DispararEstado();
-                return true;
+                    var novo = JwtDecoder.Decodificar(resp.NovoAccessToken, refreshFinal);
+                    _atual = novo;
+                    _ultimoErro = null;
+                    _log.LogInformation("Refresh OK. Novo exp: {Exp}. RefreshTokenRotacionado={Rot}",
+                        novo.ExpiraEm, !string.IsNullOrWhiteSpace(resp.NovoRefreshToken));
+
+                    _logsApp.Registrar(NivelLog.Info, "Token", "Token renovado", $"novo expira={novo.ExpiraEm:HH:mm:ss}");
+
+                    if (!string.IsNullOrWhiteSpace(novo.RefreshToken))
+                    {
+                        try { await _repo.SalvarRefreshAsync(novo.RefreshToken, ct).ConfigureAwait(false); }
+                        catch (Exception ex) { _log.LogError(ex, "Falha ao persistir refresh apos rotacao"); }
+                    }
+
+                    DispararEstado();
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    _ultimoErro = $"Refresh respondeu mas access token retornado invalido: {ex.Message}";
+                    _log.LogError(ex, "Access token retornado pelo refresh nao decodificou.");
+                    DispararEstado();
+                    return false;
+                }
             }
-            catch (Exception ex)
+
+            if (EhRejeicaoDefinitiva(resp))
             {
-                _ultimoErro = $"Refresh respondeu mas access token retornado invalido: {ex.Message}";
-                _log.LogError(ex, "Access token retornado pelo refresh nao decodificou.");
-                DispararEstado();
-                return false;
+                break;
+            }
+
+            if (tentativa < tentativas)
+            {
+                var esperaSeg = Math.Min(_opcoes.Token.BackoffMaximoSegundos,
+                    _opcoes.Token.BackoffMinimoSegundos * tentativa);
+                _log.LogWarning("Refresh falhou (tentativa {T}/{N}: {Erro}). Nova tentativa em {S}s.",
+                    tentativa, tentativas, resp.Erro ?? $"HTTP {resp.StatusHttp}", esperaSeg);
+                await Task.Delay(TimeSpan.FromSeconds(esperaSeg), ct).ConfigureAwait(false);
             }
         }
 
-        _ultimoErro = resp.Erro ?? $"Refresh falhou (HTTP {resp.StatusHttp})";
-        _logsApp.Registrar(NivelLog.Erro, "Token", "Falha ao renovar sessão", _ultimoErro);
+        if (resp is not null && EhRejeicaoDefinitiva(resp))
+        {
+            // Sessão morta no servidor: não adianta retentar com o mesmo refresh.
+            _ultimoErro = $"Sessão rejeitada pelo Compras.gov (HTTP {resp.StatusHttp}). Necessário informar um novo token.";
+            _log.LogWarning("Refresh rejeitado definitivamente (HTTP {Status}). Encerrando sessão local.", resp.StatusHttp);
+            _logsApp.Registrar(NivelLog.Erro, "Token", "Sessão perdida",
+                $"Compras.gov rejeitou o refresh (HTTP {resp.StatusHttp}). Informe um novo token na tela de Sessão.");
+            _atual = null;
+            try { await _repo.LimparAsync(ct).ConfigureAwait(false); }
+            catch (Exception ex) { _log.LogError(ex, "Falha ao limpar refresh persistido apos rejeicao definitiva"); }
+        }
+        else
+        {
+            // Falha transitória: mantém o token atual; próximo tick do keep-alive tenta de novo.
+            _ultimoErro = resp?.Erro ?? $"Refresh falhou (HTTP {resp?.StatusHttp ?? 0})";
+            _logsApp.Registrar(NivelLog.Erro, "Token", "Falha ao renovar sessão (instabilidade)",
+                $"{_ultimoErro}. Nova tentativa automática em instantes.");
+        }
+
         DispararEstado();
         return false;
     }
+
+    private static bool EhRejeicaoDefinitiva(RespostaRefreshToken resp) =>
+        resp.StatusHttp is 401 or 403;
 
     private void DispararEstado()
     {

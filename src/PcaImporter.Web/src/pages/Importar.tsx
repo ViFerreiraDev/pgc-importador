@@ -15,7 +15,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  importacaoApi, ImportacaoDuplicadaError,
+  importacaoApi, ImportacaoDuplicadaError, SemSessaoError,
 } from '@/features/importacao/importacaoApi'
 import type {
   EstadoImportacao, HistoricoImportacao, ResultadoValidacao, StatusImportacao,
@@ -45,6 +45,7 @@ export function Importar() {
   const [validando, setValidando] = useState(false)
   const [iniciando, setIniciando] = useState(false)
   const [erroGeral, setErroGeral] = useState<string | null>(null)
+  const [semSessao, setSemSessao] = useState<string | null>(null)
   const [duplicado, setDuplicado] = useState<HistoricoImportacao | null>(null)
   const [idAtivo, setIdAtivo] = useState<string | null>(null)
   const [status, setStatus] = useState<StatusImportacao | null>(null)
@@ -54,6 +55,7 @@ export function Importar() {
     setOrigem(o)
     setValidacao(null)
     setErroGeral(null)
+    setSemSessao(null)
   }
 
   async function aoValidar() {
@@ -74,6 +76,7 @@ export function Importar() {
   async function executarIniciar(confirmar = false) {
     setIniciando(true)
     setErroGeral(null)
+    setSemSessao(null)
     try {
       const { id } = origem === 'arquivo'
         ? (arquivo ? await importacaoApi.iniciar(arquivo) : { id: '' })
@@ -84,7 +87,10 @@ export function Importar() {
         setDuplicado(null)
       }
     } catch (e) {
-      if (e instanceof ImportacaoDuplicadaError) {
+      if (e instanceof SemSessaoError) {
+        setSemSessao(e.message)
+        setDuplicado(null)
+      } else if (e instanceof ImportacaoDuplicadaError) {
         setDuplicado(e.anterior)
       } else {
         setErroGeral(e instanceof Error ? e.message : String(e))
@@ -99,6 +105,7 @@ export function Importar() {
     setUrl('')
     setValidacao(null)
     setErroGeral(null)
+    setSemSessao(null)
     setDuplicado(null)
     setIdAtivo(null)
     setStatus(null)
@@ -239,6 +246,16 @@ export function Importar() {
               <Alert variant="destructive" className="mt-3">
                 <AlertTriangle />
                 <AlertDescription className="whitespace-pre-line">{erroGeral}</AlertDescription>
+              </Alert>
+            )}
+
+            {semSessao && (
+              <Alert variant="warning" className="mt-3">
+                <AlertTriangle />
+                <div>
+                  <AlertTitle>Sem sessão no Compras.gov</AlertTitle>
+                  <AlertDescription>{semSessao}</AlertDescription>
+                </div>
               </Alert>
             )}
           </div>
