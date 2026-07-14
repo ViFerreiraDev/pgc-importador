@@ -6,8 +6,9 @@ public sealed record MaterialServicoInput(
     string Codigo,
     int IdClasse,
     string NomeClasse,
-    int IdPadraoDescritivo,
-    string NomePadraoDescritivo,
+    // Serviços (CATSER) não têm PDM — nulos são omitidos do JSON enviado.
+    int? IdPadraoDescritivo,
+    string? NomePadraoDescritivo,
     string Descricao,
     decimal Quantidade,
     decimal ValorUnitario,

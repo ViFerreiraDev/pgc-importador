@@ -7,7 +7,7 @@ namespace PcaImporter.Infrastructure.Compras.Catalogo;
 public sealed class ComprasGovCatalogoClient : IComprasGovCatalogoClient
 {
     private const string CaminhoMaterial = "/modulo-material/4_consultarItemMaterial";
-    private const string CaminhoServico = "/modulo-servico/3_consultarItemServico";
+    private const string CaminhoServico = "/modulo-servico/6_consultarItemServico";
 
     private readonly HttpClient _http;
     private readonly ILogger<ComprasGovCatalogoClient> _log;
@@ -31,7 +31,13 @@ public sealed class ComprasGovCatalogoClient : IComprasGovCatalogoClient
             return null;
         }
 
-        var url = $"{caminho}?pagina=1&tamanhoPagina=10&codigoItem={Uri.EscapeDataString(codigo.Trim())}&bps=false";
+        // Serviço filtra por 'codigoServico' (o endpoint ignora 'codigoItem' silenciosamente
+        // e devolve a lista inteira paginada). Material usa 'codigoItem' + 'bps'.
+        var ehServico = tipo == "SERVICO";
+        var codigoEsc = Uri.EscapeDataString(codigo.Trim());
+        var url = ehServico
+            ? $"{caminho}?pagina=1&tamanhoPagina=10&codigoServico={codigoEsc}"
+            : $"{caminho}?pagina=1&tamanhoPagina=10&codigoItem={codigoEsc}&bps=false";
 
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
         req.Headers.TryAddWithoutValidation("Accept", "*/*");
@@ -59,6 +65,27 @@ public sealed class ComprasGovCatalogoClient : IComprasGovCatalogoClient
             if (primeiro.ValueKind != JsonValueKind.Object)
             {
                 return null;
+            }
+
+            // Shape do serviço (CATSER) difere do material: codigoServico/nomeServico/
+            // statusServico, e não existe PDM.
+            if (ehServico)
+            {
+                return new ItemCatalogoDto(
+                    CodigoItem: LerInt(primeiro, "codigoServico"),
+                    CodigoGrupo: LerInt(primeiro, "codigoGrupo"),
+                    NomeGrupo: LerString(primeiro, "nomeGrupo") ?? string.Empty,
+                    CodigoClasse: LerInt(primeiro, "codigoClasse"),
+                    NomeClasse: LerString(primeiro, "nomeClasse") ?? string.Empty,
+                    CodigoPdm: 0,
+                    NomePdm: string.Empty,
+                    DescricaoItem: LerString(primeiro, "nomeServico") ?? string.Empty,
+                    StatusItem: LerBool(primeiro, "statusServico"),
+                    ItemSustentavel: false,
+                    Tipo: tipo,
+                    DataHoraAtualizacao: LerDataHora(primeiro, "dataHoraAtualizacao"),
+                    CorpoBruto: corpo
+                );
             }
 
             return new ItemCatalogoDto(
