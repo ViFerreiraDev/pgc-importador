@@ -61,7 +61,8 @@ public static class LeitorPlanilhaDfd
         }
 
         // Aba Materiais: cabecalho linha 1, dados a partir da linha 2.
-        // Tipo (MATERIAL) e Moeda (Real) sao fixos e nao saem mais na planilha.
+        // Tipo nao sai na planilha — eh inferido pelo tamanho do codigo (CATMAT tem 6
+        // digitos; CATSER, menos de 6). Moeda (Real) continua fixa.
         // Ordem recomendada das colunas (nao importa para a leitura — mapeamos por NOME):
         //   codigo · descritivo (opcional, ignorado) · siglaUnidadeFornecimento · quantidade · valorUnitario
         // Qualquer coluna extra (ex.: 'descritivo' para conferencia visual) eh aceita e
@@ -79,11 +80,12 @@ public static class LeitorPlanilhaDfd
                 var row = abaMat.Row(linha);
                 if (row.IsEmpty()) continue;
 
+                var codigo = LerString(row, mapaMat, "codigo");
                 var mat = new EntradaImportacaoMaterial
                 {
                     LinhaPlanilha = linha,
-                    Codigo = LerString(row, mapaMat, "codigo"),
-                    Tipo = "MATERIAL",
+                    Codigo = codigo,
+                    Tipo = (codigo?.Length ?? 0) < 6 ? "SERVICO" : "MATERIAL",
                     Quantidade = LerDecimal(row, mapaMat, "quantidade"),
                     QuantidadeTexto = LerString(row, mapaMat, "quantidade"),
                     ValorUnitario = LerDecimal(row, mapaMat, "valorUnitario"),

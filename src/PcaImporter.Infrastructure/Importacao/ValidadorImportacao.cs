@@ -106,7 +106,7 @@ public static class ValidadorImportacao
             var codigosVistos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var m in entrada.Materiais)
             {
-                // Codigo: 6 dígitos
+                // Codigo: 1 a 6 dígitos (material tem 6; serviço, menos de 6)
                 if (string.IsNullOrWhiteSpace(m.Codigo))
                 {
                     erros.Add(new ErroValidacao("Materiais", "codigo", "Código do item é obrigatório.", m.LinhaPlanilha));
@@ -114,7 +114,7 @@ public static class ValidadorImportacao
                 else if (!Validadores.EhCodigoBrValido(m.Codigo))
                 {
                     erros.Add(new ErroValidacao("Materiais", "codigo",
-                        $"Código '{m.Codigo}' inválido. Deve ter exatamente 6 dígitos numéricos.", m.LinhaPlanilha));
+                        $"Código '{m.Codigo}' inválido. Deve ter de 1 a 6 dígitos numéricos (material: 6 dígitos; serviço: menos de 6).", m.LinhaPlanilha));
                 }
                 else if (!codigosVistos.Add(m.Codigo.Trim()))
                 {

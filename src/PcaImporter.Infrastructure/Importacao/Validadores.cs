@@ -56,13 +56,14 @@ public static class Validadores
     }
 
     /// <summary>
-    /// Código CATMAT/CATSER: exatamente 6 dígitos numéricos, sem outros caracteres.
+    /// Código CATMAT (material, 6 dígitos) ou CATSER (serviço, 1 a 5 dígitos):
+    /// de 1 a 6 dígitos numéricos, sem outros caracteres.
     /// </summary>
     public static bool EhCodigoBrValido(string? codigo)
     {
         if (string.IsNullOrWhiteSpace(codigo)) return false;
         var s = codigo.Trim();
-        return s.Length == 6 && s.All(char.IsDigit);
+        return s.Length is >= 1 and <= 6 && s.All(char.IsDigit);
     }
 
     private static string RemoverAcentos(string s)
