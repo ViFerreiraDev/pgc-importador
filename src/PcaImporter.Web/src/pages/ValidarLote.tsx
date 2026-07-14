@@ -481,9 +481,9 @@ function Conteudo() {
               : 'Nenhum link bate com os filtros atuais.'}
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[62vh]">
             <table className="w-full text-[12.5px]">
-              <thead>
+              <thead className="sticky top-0 z-10">
                 <tr className="text-left">
                   <Th className="w-[90px]">Status</Th>
                   <Th className="w-[150px]">Rótulo</Th>
