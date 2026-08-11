@@ -38,6 +38,11 @@ RUN dotnet publish src/PcaImporter.Api/PcaImporter.Api.csproj \
 FROM mcr.microsoft.com/dotnet/aspnet:9.0-noble AS runtime
 WORKDIR /app
 
+# Mantém compatibilidade com stacks antigas (wget) e novas (curl).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl wget \
+ && rm -rf /var/lib/apt/lists/*
+
 # Diretório persistente para o SQLite (mapeado por volume).
 RUN mkdir -p /data && chown -R 1000:1000 /data
 ENV ConnectionStrings__Sqlite="Data Source=/data/pca-importer.db" \

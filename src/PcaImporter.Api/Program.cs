@@ -14,6 +14,7 @@ builder.Services.AddControllers().AddJsonOptions(opt =>
 });
 builder.Services.AddOpenApi();
 builder.Services.AddSignalR();
+builder.Services.AddHealthChecks();
 
 // CORS aberto APENAS para endpoints públicos de consulta (api/consulta/*).
 // Aplicado via [EnableCors] no controller, não globalmente.
@@ -102,6 +103,8 @@ app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Endpoint público e leve para Docker/Swarm. Evita atrelar a saúde ao SPA ou à autenticação.
+app.MapHealthChecks("/healthz");
 app.MapControllers();
 // Hub é read-only (apenas envia eventos). Qualquer usuário autenticado pode ouvir.
 app.MapHub<TokenHub>(TokenHub.Caminho).RequireAuthorization();
