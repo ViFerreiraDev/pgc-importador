@@ -125,6 +125,20 @@ public static class DependencyInjection
     {
         var factory = sp.GetRequiredService<IDbContextFactory<PcaDbContext>>();
         await using var ctx = await factory.CreateDbContextAsync(ct).ConfigureAwait(false);
+
+        // MigrateAsync tenta obter o lock mesmo quando não há migrações pendentes.
+        // No SQLite/EF9, uma interrupção abrupta pode deixar esse lock órfão para sempre.
+        var migracoesPendentes = await ctx.Database.GetPendingMigrationsAsync(ct).ConfigureAwait(false);
+        if (!migracoesPendentes.Any())
+            return;
+
+        // A stack opera com uma única réplica e usa atualização stop-first. Portanto,
+        // qualquer lock encontrado antes de aplicar migrações pertence a um processo
+        // anterior já encerrado. O EF recria a tabela ao adquirir o novo lock.
+        await ctx.Database.ExecuteSqlRawAsync(
+            """DROP TABLE IF EXISTS "__EFMigrationsLock";""",
+            ct).ConfigureAwait(false);
+
         await ctx.Database.MigrateAsync(ct).ConfigureAwait(false);
     }
 }
