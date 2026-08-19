@@ -13,6 +13,7 @@ namespace PcaImporter.Infrastructure.Compras.Dfd;
 public sealed class ComprasGovDfdClient : IComprasGovDfdClient
 {
     private const string CaminhoCriarDfd = "/comprasnet-artefatos/api/v1/artefato/DFD";
+    private const string CaminhoExcluirDfd = "/comprasnet-artefatos/api/v1/artefato/excluir";
     private const string CaminhoAdicionarMaterialServico = "/comprasnet-artefatos/api/v1/artefato/dfd/materialservico";
     private const string CaminhoAtualizarDfd = "/comprasnet-artefatos/api/v1/artefato/dfd";
     private const string CaminhoAtualizarItemSecao = "/comprasnet-artefatos/api/v1/artefato/secao/item";
@@ -91,6 +92,26 @@ public sealed class ComprasGovDfdClient : IComprasGovDfdClient
             StatusPca: statusPca,
             CriadoEm: _tempo.GetUtcNow(),
             Secoes: secoes,
+            CorpoBruto: corpo
+        );
+    }
+
+    public async Task<ExclusaoDfdDto> ExcluirDfdAsync(long idArtefato, CancellationToken ct = default)
+    {
+        if (idArtefato <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(idArtefato), "Id do artefato deve ser maior que zero.");
+        }
+
+        var caminho = $"{CaminhoExcluirDfd}/{idArtefato}";
+        var referer = $"{_opcoes.BaseUrl}/comprasnet-artefatos-web/artefatos/lista/DFD";
+
+        // O front oficial chama este endpoint com POST e um JSON string vazio ("\"").
+        var corpo = await EnviarAsync(HttpMethod.Post, caminho, "\"\"", ct, referer).ConfigureAwait(false);
+
+        return new ExclusaoDfdDto(
+            IdArtefato: idArtefato,
+            Excluido: true,
             CorpoBruto: corpo
         );
     }

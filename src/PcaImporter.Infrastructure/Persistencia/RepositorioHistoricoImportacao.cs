@@ -27,6 +27,19 @@ public sealed class RepositorioHistoricoImportacao : IRepositorioHistoricoImport
         return e is null ? null : Mapear(e);
     }
 
+    public async Task<HistoricoImportacaoDto?> BuscarPorIdArtefatoAsync(long idArtefato, CancellationToken ct = default)
+    {
+        await using var ctx = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var e = await ctx.HistoricoImportacoes
+            .AsNoTracking()
+            .Where(x => x.IdArtefato == idArtefato)
+            .OrderByDescending(x => x.Id)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        return e is null ? null : Mapear(e);
+    }
+
     public async Task RegistrarAsync(HistoricoImportacaoDto r, CancellationToken ct = default)
     {
         await using var ctx = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);

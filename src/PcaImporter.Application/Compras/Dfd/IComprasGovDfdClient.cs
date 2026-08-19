@@ -4,6 +4,8 @@ public interface IComprasGovDfdClient
 {
     Task<DfdCriadoDto> CriarDfdAsync(CancellationToken ct = default);
 
+    Task<ExclusaoDfdDto> ExcluirDfdAsync(long idArtefato, CancellationToken ct = default);
+
     Task<MaterialServicoCriadoDto> AdicionarMaterialServicoAsync(MaterialServicoInput input, CancellationToken ct = default);
 
     Task<InformacoesGeraisAtualizadasDto> AtualizarInformacoesGeraisAsync(
@@ -29,6 +31,12 @@ public interface IComprasGovDfdClient
         AdicionarResponsavelInput input,
         CancellationToken ct = default);
 }
+
+public sealed record ExclusaoDfdDto(
+    long IdArtefato,
+    bool Excluido,
+    string CorpoBruto
+);
 
 public sealed record JustificativaAtualizadaDto(
     long Id,

@@ -29,6 +29,8 @@ public interface IRepositorioHistoricoImportacao
 {
     Task<HistoricoImportacaoDto?> BuscarPorIdPlanilhaAsync(string idPlanilha, CancellationToken ct = default);
 
+    Task<HistoricoImportacaoDto?> BuscarPorIdArtefatoAsync(long idArtefato, CancellationToken ct = default);
+
     Task RegistrarAsync(HistoricoImportacaoDto registro, CancellationToken ct = default);
 
     Task<IReadOnlyList<HistoricoImportacaoDto>> ListarAsync(int limite = 200, CancellationToken ct = default);

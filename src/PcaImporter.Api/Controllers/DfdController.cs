@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using PcaImporter.Application.Compras.Dfd;
+using PcaImporter.Application.Importacao;
 using PcaImporter.Application.Logs;
 using PcaImporter.Application.Token;
 
@@ -12,13 +13,20 @@ public sealed class DfdController : ControllerBase
 {
     private readonly IComprasGovDfdClient _client;
     private readonly IRegistroDfdAtual _registro;
+    private readonly IRepositorioHistoricoImportacao _historico;
     private readonly IRegistroLogs _logs;
     private readonly ILogger<DfdController> _log;
 
-    public DfdController(IComprasGovDfdClient client, IRegistroDfdAtual registro, IRegistroLogs logs, ILogger<DfdController> log)
+    public DfdController(
+        IComprasGovDfdClient client,
+        IRegistroDfdAtual registro,
+        IRepositorioHistoricoImportacao historico,
+        IRegistroLogs logs,
+        ILogger<DfdController> log)
     {
         _client = client;
         _registro = registro;
+        _historico = historico;
         _logs = logs;
         _log = log;
     }
@@ -60,6 +68,58 @@ public sealed class DfdController : ControllerBase
     {
         _registro.Limpar();
         return NoContent();
+    }
+
+    [HttpDelete("{idArtefato:long}")]
+    public async Task<ActionResult<ExclusaoDfdDto>> Excluir(long idArtefato, CancellationToken ct)
+    {
+        if (idArtefato <= 0)
+        {
+            return BadRequest(new { erro = "Id do artefato deve ser maior que zero." });
+        }
+
+        try
+        {
+            var login = User.Identity?.Name;
+            var ehAdmin = User.IsInRole("Admin");
+            var importacao = await _historico.BuscarPorIdArtefatoAsync(idArtefato, ct);
+            var ehProprietario = importacao is not null
+                && !string.IsNullOrWhiteSpace(login)
+                && string.Equals(importacao.UsuarioLogin, login, StringComparison.OrdinalIgnoreCase);
+
+            if (!ehAdmin && !ehProprietario)
+            {
+                _logs.Registrar(NivelLog.Aviso, "DFD", "Exclusao de DFD negada",
+                    $"idArtefato={idArtefato}", login);
+                return Forbid();
+            }
+
+            var resultado = await _client.ExcluirDfdAsync(idArtefato, ct);
+
+            if (_registro.Obter()?.IdArtefato == idArtefato)
+            {
+                _registro.Limpar();
+            }
+
+            _log.LogInformation("DFD excluido no Compras.gov. idArtefato={IdArtefato}", idArtefato);
+            _logs.Registrar(NivelLog.Sucesso, "DFD", "DFD excluido no Compras.gov",
+                $"idArtefato={idArtefato}", login);
+
+            return Ok(resultado);
+        }
+        catch (TokenIndisponivelException ex)
+        {
+            _logs.Registrar(NivelLog.Erro, "DFD", "Tentativa de excluir DFD sem token",
+                ex.Message, User.Identity?.Name);
+            return Problem(detail: ex.Message, statusCode: 401, title: "Token indisponivel");
+        }
+        catch (ComprasGovHttpException ex)
+        {
+            _logs.Registrar(NivelLog.Erro, "DFD", $"Falha ao excluir DFD (HTTP {ex.StatusHttp})",
+                $"idArtefato={idArtefato}: {ex.Message}", User.Identity?.Name);
+            return Problem(detail: ex.Message, statusCode: ex.StatusHttp,
+                title: "Falha no Compras", instance: ex.CorpoBruto);
+        }
     }
 
     [HttpPut("atual/informacoes-gerais")]
