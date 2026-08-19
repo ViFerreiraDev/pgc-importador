@@ -12,6 +12,12 @@ public interface IGerenciadorTokenSessao
 
     Task<StatusTokenDto> ForcarRefreshAsync(CancellationToken ct = default);
 
+    /// <summary>
+    /// Renova a sessão somente quando ela estiver expirada ou dentro do limiar
+    /// configurado. Usado pelo keep-alive; chamadas concorrentes são serializadas.
+    /// </summary>
+    Task<bool> RefreshSeNecessarioAsync(CancellationToken ct = default);
+
     void Limpar();
 
     event Action<StatusTokenDto>? EstadoMudou;

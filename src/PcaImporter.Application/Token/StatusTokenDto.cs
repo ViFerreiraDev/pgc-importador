@@ -13,5 +13,7 @@ public sealed record StatusTokenDto(
     IReadOnlyList<string>? Mnemonicos,
     DateTimeOffset? UltimoRefreshEm,
     string? UltimoErroRefresh,
-    bool TemRefreshToken
+    bool TemRefreshToken,
+    int FalhasConsecutivasRefresh = 0,
+    DateTimeOffset? ProximaTentativaEm = null
 );

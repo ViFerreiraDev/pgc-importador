@@ -5,6 +5,7 @@ using PcaImporter.Api.Controllers;
 using PcaImporter.Api.Hubs;
 using PcaImporter.Application.Validacao;
 using PcaImporter.Infrastructure;
+using PcaImporter.Infrastructure.Compras;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -14,7 +15,8 @@ builder.Services.AddControllers().AddJsonOptions(opt =>
 });
 builder.Services.AddOpenApi();
 builder.Services.AddSignalR();
-builder.Services.AddHealthChecks();
+builder.Services.AddHealthChecks()
+    .AddCheck<KeepAliveTokenHealthCheck>("token_keep_alive");
 
 // CORS aberto APENAS para endpoints públicos de consulta (api/consulta/*).
 // Aplicado via [EnableCors] no controller, não globalmente.

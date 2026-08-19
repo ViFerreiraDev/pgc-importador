@@ -33,10 +33,16 @@ public sealed class ComprasGovTokenClient : IComprasGovTokenClient
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", refresh);
         req.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
 
+        // HttpClient sinaliza tanto timeout quanto cancelamento externo com
+        // OperationCanceledException. Um token próprio permite distinguir os casos:
+        // timeout é transitório e deve ser retentado; shutdown deve ser propagado.
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, _opcoes.Token.TimeoutRetokenSegundos)));
+
         try
         {
-            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
-            var corpo = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            using var resp = await _http.SendAsync(req, timeoutCts.Token).ConfigureAwait(false);
+            var corpo = await resp.Content.ReadAsStringAsync(timeoutCts.Token).ConfigureAwait(false);
 
             if (!resp.IsSuccessStatusCode)
             {
@@ -56,6 +62,13 @@ public sealed class ComprasGovTokenClient : IComprasGovTokenClient
             }
 
             return new RespostaRefreshToken(true, (int)resp.StatusCode, novoAccess, novoRefresh, corpo, null);
+        }
+        catch (OperationCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            var segundos = Math.Max(1, _opcoes.Token.TimeoutRetokenSegundos);
+            _log.LogWarning(ex, "Timeout ao chamar retoken apos {Segundos}s", segundos);
+            return new RespostaRefreshToken(false, 0, null, null, string.Empty,
+                $"Timeout ao chamar retoken apos {segundos}s");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

@@ -55,15 +55,16 @@ public static class DependencyInjection
         {
             var opcoes = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<ComprasGovOptions>>().Value;
             http.BaseAddress = new Uri(opcoes.BaseUrl);
-            // Timeout curto: o retoken é retentado com backoff, então cada tentativa
-            // precisa falhar rápido pra caber na janela de validade do token.
-            http.Timeout = TimeSpan.FromSeconds(opcoes.Token.TimeoutRetokenSegundos);
+            // O timeout é controlado pelo ComprasGovTokenClient para diferenciar
+            // indisponibilidade transitória do cancelamento real da aplicação.
+            http.Timeout = Timeout.InfiniteTimeSpan;
         });
 
         services.AddSingleton<GerenciadorTokenSessao>();
         services.AddSingleton<IGerenciadorTokenSessao>(sp => sp.GetRequiredService<GerenciadorTokenSessao>());
 
-        services.AddHostedService<KeepAliveTokenWorker>();
+        services.AddSingleton<KeepAliveTokenWorker>();
+        services.AddHostedService(sp => sp.GetRequiredService<KeepAliveTokenWorker>());
         services.AddHostedService<BootstrapTokenAoIniciar>();
 
         services.AddHttpClient<PcaImporter.Application.Consulta.IConsultaPessoaClient, PcaImporter.Infrastructure.Compras.Consulta.ConsultaPessoaClient>((sp, http) =>

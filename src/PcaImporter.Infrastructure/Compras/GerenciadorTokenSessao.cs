@@ -19,6 +19,8 @@ public sealed class GerenciadorTokenSessao : IGerenciadorTokenSessao, IDisposabl
     private TokenSessao? _atual;
     private DateTimeOffset? _ultimoRefreshEm;
     private string? _ultimoErro;
+    private int _falhasConsecutivasRefresh;
+    private DateTimeOffset? _proximaTentativaEm;
 
     public event Action<StatusTokenDto>? EstadoMudou;
 
@@ -70,6 +72,8 @@ public sealed class GerenciadorTokenSessao : IGerenciadorTokenSessao, IDisposabl
             _atual = token;
             _ultimoErro = null;
             _ultimoRefreshEm = _tempo.GetUtcNow();
+            _falhasConsecutivasRefresh = 0;
+            _proximaTentativaEm = null;
             _log.LogInformation("Token bootstrapado a partir do refresh. Sub={Sub} IdSessao={IdSessao} ExpiraEm={Exp}",
                 token.Sub, token.IdSessao, token.ExpiraEm);
 
@@ -175,6 +179,8 @@ public sealed class GerenciadorTokenSessao : IGerenciadorTokenSessao, IDisposabl
             _atual = null;
             _ultimoErro = null;
             _ultimoRefreshEm = null;
+            _falhasConsecutivasRefresh = 0;
+            _proximaTentativaEm = null;
             try { _repo.LimparAsync().GetAwaiter().GetResult(); }
             catch (Exception ex) { _log.LogError(ex, "Falha ao limpar refresh persistido"); }
             _logsApp.Registrar(NivelLog.Info, "Token", "Sessão encerrada");
@@ -219,6 +225,8 @@ public sealed class GerenciadorTokenSessao : IGerenciadorTokenSessao, IDisposabl
                     var novo = JwtDecoder.Decodificar(resp.NovoAccessToken, refreshFinal);
                     _atual = novo;
                     _ultimoErro = null;
+                    _falhasConsecutivasRefresh = 0;
+                    _proximaTentativaEm = null;
                     _log.LogInformation("Refresh OK. Novo exp: {Exp}. RefreshTokenRotacionado={Rot}",
                         novo.ExpiraEm, !string.IsNullOrWhiteSpace(resp.NovoRefreshToken));
 
@@ -242,6 +250,8 @@ public sealed class GerenciadorTokenSessao : IGerenciadorTokenSessao, IDisposabl
                 }
             }
 
+            _falhasConsecutivasRefresh++;
+
             if (EhRejeicaoDefinitiva(resp))
             {
                 break;
@@ -251,11 +261,19 @@ public sealed class GerenciadorTokenSessao : IGerenciadorTokenSessao, IDisposabl
             {
                 var esperaSeg = Math.Min(_opcoes.Token.BackoffMaximoSegundos,
                     _opcoes.Token.BackoffMinimoSegundos * tentativa);
-                _log.LogWarning("Refresh falhou (tentativa {T}/{N}: {Erro}). Nova tentativa em {S}s.",
-                    tentativa, tentativas, resp.Erro ?? $"HTTP {resp.StatusHttp}", esperaSeg);
-                await Task.Delay(TimeSpan.FromSeconds(esperaSeg), ct).ConfigureAwait(false);
+                var jitterMs = Random.Shared.Next(0, Math.Max(1, esperaSeg * 250));
+                var espera = TimeSpan.FromMilliseconds(esperaSeg * 1000L + jitterMs);
+                _proximaTentativaEm = _tempo.GetUtcNow().Add(espera);
+                _log.LogWarning(
+                    "Refresh falhou (tentativa {T}/{N}: {Erro}; falhas consecutivas {Falhas}). Nova tentativa em {S:F1}s.",
+                    tentativa, tentativas, resp.Erro ?? $"HTTP {resp.StatusHttp}",
+                    _falhasConsecutivasRefresh, espera.TotalSeconds);
+                DispararEstado();
+                await Task.Delay(espera, ct).ConfigureAwait(false);
             }
         }
+
+        _proximaTentativaEm = null;
 
         if (resp is not null && EhRejeicaoDefinitiva(resp))
         {
@@ -300,7 +318,8 @@ public sealed class GerenciadorTokenSessao : IGerenciadorTokenSessao, IDisposabl
     {
         if (_atual is null)
         {
-            return new StatusTokenDto(EstadoToken.Ausente, null, null, null, null, null, null, null, _ultimoRefreshEm, _ultimoErro, false);
+            return new StatusTokenDto(EstadoToken.Ausente, null, null, null, null, null, null, null,
+                _ultimoRefreshEm, _ultimoErro, false, _falhasConsecutivasRefresh, _proximaTentativaEm);
         }
 
         var restante = _atual.TempoRestante(agora);
@@ -331,7 +350,9 @@ public sealed class GerenciadorTokenSessao : IGerenciadorTokenSessao, IDisposabl
             Mnemonicos: _atual.Mnemonicos,
             UltimoRefreshEm: _ultimoRefreshEm,
             UltimoErroRefresh: _ultimoErro,
-            TemRefreshToken: !string.IsNullOrWhiteSpace(_atual.RefreshToken)
+            TemRefreshToken: !string.IsNullOrWhiteSpace(_atual.RefreshToken),
+            FalhasConsecutivasRefresh: _falhasConsecutivasRefresh,
+            ProximaTentativaEm: _proximaTentativaEm
         );
     }
 }

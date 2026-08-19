@@ -20,6 +20,8 @@ export interface StatusToken {
   ultimoRefreshEm: string | null
   ultimoErroRefresh: string | null
   temRefreshToken: boolean
+  falhasConsecutivasRefresh: number
+  proximaTentativaEm: string | null
 }
 
 interface StatusBruto {
@@ -34,9 +36,16 @@ interface StatusBruto {
   ultimoRefreshEm: string | null
   ultimoErroRefresh: string | null
   temRefreshToken: boolean
+  falhasConsecutivasRefresh?: number
+  proximaTentativaEm?: string | null
 }
 
 export function normalizarStatus(bruto: StatusBruto): StatusToken {
   const estado = typeof bruto.estado === 'number' ? ESTADO_POR_NUMERO[bruto.estado] ?? 'Ausente' : bruto.estado
-  return { ...bruto, estado }
+  return {
+    ...bruto,
+    estado,
+    falhasConsecutivasRefresh: bruto.falhasConsecutivasRefresh ?? 0,
+    proximaTentativaEm: bruto.proximaTentativaEm ?? null,
+  }
 }
