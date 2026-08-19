@@ -18,4 +18,6 @@ public sealed class HistoricoImportacaoEntity
     public int? LinhaErro { get; set; }
     public string? Descricao { get; set; }
     public string? UsuarioLogin { get; set; }
+    public DateTimeOffset? DfdExcluidoEm { get; set; }
+    public string? DfdExcluidoPorLogin { get; set; }
 }

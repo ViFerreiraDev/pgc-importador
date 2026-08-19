@@ -96,6 +96,8 @@ public sealed class DfdController : ControllerBase
 
             var resultado = await _client.ExcluirDfdAsync(idArtefato, ct);
 
+            await _historico.MarcarDfdExcluidoAsync(idArtefato, login, ct);
+
             if (_registro.Obter()?.IdArtefato == idArtefato)
             {
                 _registro.Limpar();

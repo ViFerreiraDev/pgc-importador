@@ -16,15 +16,29 @@ public sealed class RepositorioHistoricoImportacao : IRepositorioHistoricoImport
     public async Task<HistoricoImportacaoDto?> BuscarPorIdPlanilhaAsync(string idPlanilha, CancellationToken ct = default)
     {
         await using var ctx = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
-        // Duplicado só conta se a importação anterior teve sucesso (gerou DFD real no Compras).
-        // Tentativas falhas podem ser refeitas livremente sem alerta.
+        // Duplicado só conta se a importação anterior gerou um DFD que continua ativo.
+        // Tentativas falhas e DFDs já excluídos podem ser refeitos livremente.
         var e = await ctx.HistoricoImportacoes
-            .Where(x => x.IdPlanilha == idPlanilha && x.Sucesso)
+            .Where(x => x.IdPlanilha == idPlanilha && x.Sucesso && x.DfdExcluidoEm == null)
             .OrderByDescending(x => x.Id)
             .FirstOrDefaultAsync(ct)
             .ConfigureAwait(false);
 
         return e is null ? null : Mapear(e);
+    }
+
+    public async Task<bool> MarcarDfdExcluidoAsync(
+        long idArtefato, string? usuarioLogin, CancellationToken ct = default)
+    {
+        await using var ctx = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        DateTimeOffset? excluidoEm = DateTimeOffset.UtcNow;
+        var atualizado = await ctx.HistoricoImportacoes
+            .Where(x => x.IdArtefato == idArtefato && x.DfdExcluidoEm == null)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(x => x.DfdExcluidoEm, excluidoEm)
+                .SetProperty(x => x.DfdExcluidoPorLogin, usuarioLogin), ct)
+            .ConfigureAwait(false);
+        return atualizado > 0;
     }
 
     public async Task<HistoricoImportacaoDto?> BuscarPorIdArtefatoAsync(long idArtefato, CancellationToken ct = default)

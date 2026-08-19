@@ -38,7 +38,9 @@ public class PcaDbContext : DbContext
             b.Property(x => x.UrlOriginal).IsRequired();
             b.Property(x => x.IdExecucao).IsRequired().HasMaxLength(40);
             b.Property(x => x.ValorTotal).HasColumnType("TEXT").HasDefaultValue(0m);
+            b.Property(x => x.DfdExcluidoPorLogin).HasMaxLength(60);
             b.HasIndex(x => x.IdPlanilha);
+            b.HasIndex(x => x.DfdExcluidoEm);
         });
 
         modelBuilder.Entity<UsuarioEntity>(b =>

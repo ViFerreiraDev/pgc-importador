@@ -152,6 +152,7 @@ public sealed class ValidacaoController : ControllerBase
         try
         {
             var resultado = await _dfd.ExcluirDfdAsync(importacao.IdArtefato, ct);
+            await _historico.MarcarDfdExcluidoAsync(importacao.IdArtefato, login, ct);
             await _servico.ExcluirLinkAsync(id, login, ct);
             return Ok(resultado);
         }

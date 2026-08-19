@@ -31,6 +31,8 @@ public interface IRepositorioHistoricoImportacao
 
     Task<HistoricoImportacaoDto?> BuscarPorIdArtefatoAsync(long idArtefato, CancellationToken ct = default);
 
+    Task<bool> MarcarDfdExcluidoAsync(long idArtefato, string? usuarioLogin, CancellationToken ct = default);
+
     Task RegistrarAsync(HistoricoImportacaoDto registro, CancellationToken ct = default);
 
     Task<IReadOnlyList<HistoricoImportacaoDto>> ListarAsync(int limite = 200, CancellationToken ct = default);
