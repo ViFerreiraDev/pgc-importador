@@ -71,6 +71,13 @@ export const listaApi = {
     })
     return tratarSemBody(r)
   },
+  async excluirDfdImportado(linkId: number): Promise<void> {
+    const r = await fetch(`/api/lista-validacao/links/${linkId}/dfd`, {
+      method: 'DELETE',
+      credentials: 'include',
+    })
+    return tratarSemBody(r)
+  },
   async restaurar(linkId: number): Promise<void> {
     const r = await fetch(`/api/lista-validacao/links/${linkId}/restaurar`, {
       method: 'POST',

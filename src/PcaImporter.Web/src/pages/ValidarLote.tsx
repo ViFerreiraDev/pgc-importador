@@ -779,7 +779,7 @@ function LinhaLink({
   onImportar: () => void
   sendoImportado: boolean
 }) {
-  const { validar, excluir, restaurar, apagarDefinitivamente } = useListaValidacao()
+  const { validar, excluir, excluirDfdImportado, restaurar, apagarDefinitivamente } = useListaValidacao()
   const [agindo, setAgindo] = useState<string | null>(null)
   const [erroAcao, setErroAcao] = useState<string | null>(null)
 
@@ -788,6 +788,19 @@ function LinhaLink({
     setErroAcao(null)
     try { await fn() } catch (e) { setErroAcao(e instanceof Error ? e.message : String(e)) }
     finally { setAgindo(null) }
+  }
+
+  async function excluirPelaLixeira() {
+    if (!link.importadoEm) {
+      await excluir(link.id)
+      return
+    }
+
+    const confirmado = window.confirm(
+      'Este link já foi importado. O DFD será excluído definitivamente do Compras.gov e o link irá para a lixeira local. Deseja continuar?',
+    )
+    if (!confirmado) return
+    await excluirDfdImportado(link.id)
   }
 
   // Sessão do Compras NÃO bloqueia o clique: se estiver deslogado, o backend
@@ -886,7 +899,17 @@ function LinhaLink({
                 {sendoImportado ? <Loader2 className="animate-spin" /> : <Play />}
                 Importar
               </Button>
-              <Button variant="ghost" size="xs" onClick={() => void correr('excluir', () => excluir(link.id))} disabled={agindo !== null || bloqueado} title={bloqueado ? 'Aguarde a importação em andamento' : 'Excluir (vai pra lixeira)'}>
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => void correr('excluir', excluirPelaLixeira)}
+                disabled={agindo !== null || bloqueado}
+                title={bloqueado
+                  ? 'Aguarde a importação em andamento'
+                  : link.importadoEm
+                    ? 'Excluir o DFD do Compras.gov e mover o link para a lixeira'
+                    : 'Mover o link para a lixeira'}
+              >
                 {agindo === 'excluir' ? <Loader2 className="animate-spin" /> : <Trash2 className="text-[hsl(var(--error-500))]" />}
               </Button>
             </>

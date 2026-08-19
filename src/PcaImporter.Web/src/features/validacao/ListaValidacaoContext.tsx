@@ -15,6 +15,7 @@ interface Valor {
   compararLote(texto: string, classe?: string): Promise<DiffLote>
   validar(linkId: number): Promise<void>
   excluir(linkId: number): Promise<void>
+  excluirDfdImportado(linkId: number): Promise<void>
   restaurar(linkId: number): Promise<void>
   apagarDefinitivamente(linkId: number): Promise<void>
   alternarRevisao(itemId: number, jaRevisado: boolean): Promise<void>
@@ -135,6 +136,10 @@ export function ProvedorListaValidacao({ children }: { children: ReactNode }) {
     await listaApi.excluir(linkId)
   }, [])
 
+  const excluirDfdImportado = useCallback(async (linkId: number) => {
+    await listaApi.excluirDfdImportado(linkId)
+  }, [])
+
   const restaurar = useCallback(async (linkId: number) => {
     await listaApi.restaurar(linkId)
   }, [])
@@ -163,9 +168,9 @@ export function ProvedorListaValidacao({ children }: { children: ReactNode }) {
 
   const valor = useMemo<Valor>(() => ({
     ativos, lixeira, gaps, carregando, erro,
-    adicionarLink, extrairLinks, compararLote, validar, excluir, restaurar, apagarDefinitivamente,
+    adicionarLink, extrairLinks, compararLote, validar, excluir, excluirDfdImportado, restaurar, apagarDefinitivamente,
     alternarRevisao, importar, recarregar,
-  }), [ativos, lixeira, gaps, carregando, erro, adicionarLink, extrairLinks, compararLote, validar, excluir, restaurar, apagarDefinitivamente, alternarRevisao, importar, recarregar])
+  }), [ativos, lixeira, gaps, carregando, erro, adicionarLink, extrairLinks, compararLote, validar, excluir, excluirDfdImportado, restaurar, apagarDefinitivamente, alternarRevisao, importar, recarregar])
 
   return <Ctx.Provider value={valor}>{children}</Ctx.Provider>
 }

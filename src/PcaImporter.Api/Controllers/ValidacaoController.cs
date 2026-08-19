@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using PcaImporter.Application.Compras.Dfd;
 using PcaImporter.Application.Importacao;
 using PcaImporter.Application.Token;
 using PcaImporter.Application.Validacao;
@@ -13,11 +14,19 @@ public sealed class ValidacaoController : ControllerBase
 {
     private readonly IServicoListaValidacao _servico;
     private readonly IServicoImportacao _importacao;
+    private readonly IRepositorioHistoricoImportacao _historico;
+    private readonly IComprasGovDfdClient _dfd;
 
-    public ValidacaoController(IServicoListaValidacao servico, IServicoImportacao importacao)
+    public ValidacaoController(
+        IServicoListaValidacao servico,
+        IServicoImportacao importacao,
+        IRepositorioHistoricoImportacao historico,
+        IComprasGovDfdClient dfd)
     {
         _servico = servico;
         _importacao = importacao;
+        _historico = historico;
+        _dfd = dfd;
     }
 
     [HttpGet]
@@ -114,6 +123,46 @@ public sealed class ValidacaoController : ControllerBase
         catch (LinkNaoEncontradoException)
         {
             return NotFound();
+        }
+    }
+
+    [HttpDelete("links/{id:int}/dfd")]
+    public async Task<ActionResult<ExclusaoDfdDto>> ExcluirDfdImportado(int id, CancellationToken ct)
+    {
+        var lista = await _servico.ObterListaAsync(ct);
+        var link = lista.Ativos.FirstOrDefault(l => l.Id == id);
+        if (link is null) return NotFound(new { erro = "Link não encontrado na lista ativa." });
+        if (link.ImportadoEm is null)
+        {
+            return Conflict(new { erro = "Este link não possui uma importação concluída." });
+        }
+
+        var importacao = await _historico.BuscarPorIdPlanilhaAsync(link.IdPlanilha, ct);
+        if (importacao is null || importacao.IdArtefato <= 0)
+        {
+            return Conflict(new { erro = "Não foi encontrado o IdArtefato da importação." });
+        }
+
+        var login = User.Identity?.Name;
+        var ehAdmin = User.IsInRole("Admin");
+        var ehProprietario = !string.IsNullOrWhiteSpace(login)
+            && string.Equals(importacao.UsuarioLogin, login, StringComparison.OrdinalIgnoreCase);
+        if (!ehAdmin && !ehProprietario) return Forbid();
+
+        try
+        {
+            var resultado = await _dfd.ExcluirDfdAsync(importacao.IdArtefato, ct);
+            await _servico.ExcluirLinkAsync(id, login, ct);
+            return Ok(resultado);
+        }
+        catch (TokenIndisponivelException ex)
+        {
+            return Conflict(new { erro = ex.Message, semSessao = true });
+        }
+        catch (ComprasGovHttpException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: ex.StatusHttp,
+                title: "Falha ao excluir DFD no Compras.gov");
         }
     }
 
