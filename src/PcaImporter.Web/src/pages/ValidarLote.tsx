@@ -782,6 +782,7 @@ function LinhaLink({
   const { validar, excluir, excluirDfdImportado, restaurar, apagarDefinitivamente } = useListaValidacao()
   const [agindo, setAgindo] = useState<string | null>(null)
   const [erroAcao, setErroAcao] = useState<string | null>(null)
+  const [confirmarExclusaoDfd, setConfirmarExclusaoDfd] = useState(false)
 
   async function correr<T>(rotulo: string, fn: () => Promise<T>) {
     setAgindo(rotulo)
@@ -790,17 +791,27 @@ function LinhaLink({
     finally { setAgindo(null) }
   }
 
-  async function excluirPelaLixeira() {
+  function solicitarExclusao() {
+    setErroAcao(null)
     if (!link.importadoEm) {
-      await excluir(link.id)
+      void correr('excluir', () => excluir(link.id))
       return
     }
 
-    const confirmado = window.confirm(
-      'Este link já foi importado. O DFD será excluído definitivamente do Compras.gov e o link irá para a lixeira local. Deseja continuar?',
-    )
-    if (!confirmado) return
-    await excluirDfdImportado(link.id)
+    setConfirmarExclusaoDfd(true)
+  }
+
+  async function confirmarExclusaoNoCompras() {
+    setAgindo('excluir')
+    setErroAcao(null)
+    try {
+      await excluirDfdImportado(link.id)
+      setConfirmarExclusaoDfd(false)
+    } catch (e) {
+      setErroAcao(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAgindo(null)
+    }
   }
 
   // Sessão do Compras NÃO bloqueia o clique: se estiver deslogado, o backend
@@ -902,7 +913,7 @@ function LinhaLink({
               <Button
                 variant="ghost"
                 size="xs"
-                onClick={() => void correr('excluir', excluirPelaLixeira)}
+                onClick={solicitarExclusao}
                 disabled={agindo !== null || bloqueado}
                 title={bloqueado
                   ? 'Aguarde a importação em andamento'
@@ -932,6 +943,81 @@ function LinhaLink({
             </>
           )}
         </div>
+
+        <Dialog
+          open={confirmarExclusaoDfd}
+          onOpenChange={(open) => {
+            if (!open && agindo !== 'excluir') {
+              setConfirmarExclusaoDfd(false)
+              setErroAcao(null)
+            }
+          }}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <div className="mb-1 flex size-10 items-center justify-center rounded-full bg-destructive/10">
+                <Trash2 className="size-5 text-destructive" />
+              </div>
+              <DialogTitle>Excluir DFD do Compras.gov?</DialogTitle>
+              <DialogDescription>
+                Esta ação afeta o DFD criado pela importação de <strong className="text-foreground">{link.rotulo ?? link.idPlanilha}</strong>.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="overflow-hidden rounded-lg border border-border text-[13px]">
+              <div className="flex gap-3 border-b border-border bg-destructive/5 p-3.5">
+                <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-destructive/10 text-destructive">
+                  <ExternalLink className="size-3.5" />
+                </div>
+                <div>
+                  <div className="font-semibold text-foreground">No Compras.gov</div>
+                  <p className="mt-0.5 text-muted-foreground">
+                    O DFD será excluído definitivamente. Essa etapa não pode ser desfeita pelo sistema.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-3 bg-muted/20 p-3.5">
+                <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                  <Trash2 className="size-3.5" />
+                </div>
+                <div>
+                  <div className="font-semibold text-foreground">Na lista local</div>
+                  <p className="mt-0.5 text-muted-foreground">
+                    O link irá para a lixeira e ficará disponível para restauração ou nova importação.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {erroAcao && (
+              <Alert variant="destructive">
+                <AlertTriangle />
+                <AlertDescription>{erroAcao}</AlertDescription>
+              </Alert>
+            )}
+
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setConfirmarExclusaoDfd(false)
+                  setErroAcao(null)
+                }}
+                disabled={agindo === 'excluir'}
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => void confirmarExclusaoNoCompras()}
+                disabled={agindo === 'excluir'}
+              >
+                {agindo === 'excluir' ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                {agindo === 'excluir' ? 'Excluindo…' : 'Excluir do Compras.gov'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </Td>
     </tr>
   )
