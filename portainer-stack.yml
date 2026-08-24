@@ -10,14 +10,14 @@
 #    2. Web editor → cole o conteúdo deste arquivo
 #    3. Environment variables (opcional):
 #         PGC_PORT       porta de exposição no host (default 8800)
-#         PGC_VERSION    tag da imagem (default "0.6.5")
+#         PGC_VERSION    tag da imagem (default "0.6.6")
 #         PCA_RESET_ADMIN  defina "1" só uma vez para resetar admin
 #    4. Deploy the stack
 # ========================================================================
 
 services:
   pgc:
-    image: windinxd/pgc-importador:${PGC_VERSION:-0.6.5}
+    image: windinxd/pgc-importador:${PGC_VERSION:-0.6.6}
     container_name: pgc-importador
     ports:
       - "${PGC_PORT:-8800}:8080"

@@ -340,25 +340,42 @@ public sealed class ServicoImportacao : IServicoImportacao
                     throw new InvalidOperationException(err);
                 }
 
-                var inputMat = new MaterialServicoInput(
-                    IdFormalizacaoDemanda: dfdCriado.IdFormalizacaoDemanda,
-                    Tipo: cat.Tipo,
-                    Codigo: cat.CodigoItem.ToString(),
-                    IdClasse: cat.CodigoClasse,
-                    NomeClasse: cat.NomeClasse,
-                    IdPadraoDescritivo: cat.CodigoPdm > 0 ? cat.CodigoPdm : null,
-                    NomePadraoDescritivo: string.IsNullOrWhiteSpace(cat.NomePdm) ? null : cat.NomePdm,
-                    Descricao: cat.DescricaoItem,
-                    Quantidade: m.Quantidade!.Value,
-                    ValorUnitario: m.ValorUnitario!.Value,
-                    Moeda: m.Moeda ?? "Real",
-                    SiglaUnidadeFornecimento: m.SiglaUnidadeFornecimento!
-                );
                 MaterialServicoCriadoDto criadoMat;
                 try
                 {
                     criadoMat = await Resiliencia.TentarComBackoffAsync(
-                        (token) => _dfd.AdicionarMaterialServicoAsync(inputMat, token),
+                        (token) => ehMaterial
+                            ? _dfd.AdicionarMaterialServicoAsync(
+                                new MaterialServicoInput(
+                                    IdFormalizacaoDemanda: dfdCriado.IdFormalizacaoDemanda,
+                                    Tipo: cat.Tipo,
+                                    Codigo: cat.CodigoItem.ToString(),
+                                    IdClasse: cat.CodigoClasse,
+                                    NomeClasse: cat.NomeClasse,
+                                    IdPadraoDescritivo: cat.CodigoPdm > 0 ? cat.CodigoPdm : null,
+                                    NomePadraoDescritivo: string.IsNullOrWhiteSpace(cat.NomePdm) ? null : cat.NomePdm,
+                                    Descricao: cat.DescricaoItem,
+                                    Quantidade: m.Quantidade!.Value,
+                                    ValorUnitario: m.ValorUnitario!.Value,
+                                    Moeda: m.Moeda ?? "Real",
+                                    SiglaUnidadeFornecimento: m.SiglaUnidadeFornecimento!),
+                                token)
+                            : _dfd.AdicionarServicoAsync(
+                                dfdCriado.IdArtefato,
+                                dfdCriado.Numero,
+                                dfdCriado.Ano,
+                                new ServicoInput(
+                                    Codigo: cat.CodigoItem.ToString(),
+                                    Tipo: "SERVICO",
+                                    SiglaUnidadeMedida: m.SiglaUnidadeFornecimento!,
+                                    Descricao: cat.DescricaoItem,
+                                    ValorUnitario: m.ValorUnitario!.Value,
+                                    Moeda: m.Moeda ?? "Real",
+                                    NomeGrupo: cat.NomeGrupo,
+                                    Quantidade: m.Quantidade!.Value,
+                                    IdFormalizacaoDemanda: dfdCriado.IdFormalizacaoDemanda,
+                                    IdGrupo: cat.CodigoGrupo),
+                                token),
                         aoFalhar: (tent, ex, espera) =>
                         {
                             _registroImp.Atualizar(idImp, e =>

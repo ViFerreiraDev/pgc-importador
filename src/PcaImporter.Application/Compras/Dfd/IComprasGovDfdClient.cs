@@ -8,6 +8,13 @@ public interface IComprasGovDfdClient
 
     Task<MaterialServicoCriadoDto> AdicionarMaterialServicoAsync(MaterialServicoInput input, CancellationToken ct = default);
 
+    Task<MaterialServicoCriadoDto> AdicionarServicoAsync(
+        long idArtefato,
+        int numero,
+        int ano,
+        ServicoInput input,
+        CancellationToken ct = default);
+
     Task<InformacoesGeraisAtualizadasDto> AtualizarInformacoesGeraisAsync(
         long idFormalizacaoDemanda,
         long idArtefato,

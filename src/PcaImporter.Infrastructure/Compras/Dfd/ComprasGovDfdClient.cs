@@ -168,6 +168,30 @@ public sealed class ComprasGovDfdClient : IComprasGovDfdClient
         var json = JsonSerializer.Serialize(input, OpcoesJson);
         var corpo = await EnviarAsync(HttpMethod.Post, CaminhoAdicionarMaterialServico, json, ct).ConfigureAwait(false);
 
+        return LerMaterialServicoCriado(corpo);
+    }
+
+    public async Task<MaterialServicoCriadoDto> AdicionarServicoAsync(
+        long idArtefato,
+        int numero,
+        int ano,
+        ServicoInput input,
+        CancellationToken ct = default)
+    {
+        var json = JsonSerializer.Serialize(input, OpcoesJson);
+        var referer = $"{_opcoes.BaseUrl}/comprasnet-artefatos-web/artefatos/edit/{idArtefato}?artefato={numero}%2F{ano}&tipo=DFD";
+        var corpo = await EnviarAsync(
+            HttpMethod.Post,
+            CaminhoAdicionarMaterialServico,
+            json,
+            ct,
+            referer).ConfigureAwait(false);
+
+        return LerMaterialServicoCriado(corpo);
+    }
+
+    private MaterialServicoCriadoDto LerMaterialServicoCriado(string corpo)
+    {
         using var doc = JsonDocument.Parse(corpo);
         var raiz = doc.RootElement;
 
@@ -184,8 +208,12 @@ public sealed class ComprasGovDfdClient : IComprasGovDfdClient
             ValorUnitario: LerDecimal(raiz, "valorUnitario"),
             ValorTotal: LerDecimal(raiz, "valorTotal"),
             Moeda: LerString(raiz, "moeda") ?? string.Empty,
-            SiglaUnidadeFornecimento: LerString(raiz, "siglaUnidadeFornecimento") ?? string.Empty,
-            NomeUnidadeFornecimento: LerString(raiz, "nomeUnidadeFornecimento") ?? string.Empty,
+            SiglaUnidadeFornecimento: LerString(raiz, "siglaUnidadeFornecimento")
+                ?? LerString(raiz, "siglaUnidadeMedida")
+                ?? string.Empty,
+            NomeUnidadeFornecimento: LerString(raiz, "nomeUnidadeFornecimento")
+                ?? LerString(raiz, "nomeUnidadeMedida")
+                ?? string.Empty,
             DataHoraOperacao: LerDataHora(raiz, "dataHoraOperacao") ?? _tempo.GetUtcNow(),
             LoginOperacao: LerLong(raiz, "loginOperacao"),
             CorpoBruto: corpo
